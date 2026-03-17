@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models import Agent, AgentResponse, apply_update, AgentUpdate
 from app.services.aigateway import AIGatewayClient
@@ -118,8 +119,11 @@ async def generate(
     agent = result.scalar_one_or_none()
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
-    if not agent.gateway_token:
-        raise HTTPException(status_code=422, detail="Agent has no gateway_token. Use Register AIGateway first.")
+    # Use the system key (admin-level, smart routing) for generation calls.
+    # Falls back to the agent's own key if no system key is configured.
+    key = settings.system_gateway_key or agent.gateway_token
+    if not key:
+        raise HTTPException(status_code=422, detail="No system_gateway_key configured and agent has no gateway_token.")
 
     prompt_text = _PROMPT.format(
         name=agent.name or "(not set)",
@@ -135,7 +139,7 @@ async def generate(
         avatar_spec=_fmt(agent.avatar_spec),
     )
 
-    gw_client = AIGatewayClient(agent.gateway_token)
+    gw_client = AIGatewayClient(key)
     try:
         gw_response = await gw_client.complete(
             messages=[{"role": "user", "content": prompt_text}],
@@ -151,9 +155,13 @@ async def generate(
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=502, detail=f"Failed to parse AI response: {exc}\nRaw: {raw_text[:300]}")
 
-    update_schema = AgentUpdate(**{k: v for k, v in generated.items() if hasattr(AgentUpdate, k)})
+    update_schema = AgentUpdate(**{k: v for k, v in generated.items() if k in AgentUpdate.model_fields})
     apply_update(agent, update_schema)
     await db.commit()
     await db.refresh(agent)
 
-    return {"generated": generated, "model_used": gw_response.get("model")}
+    return {
+        "generated": generated,
+        "model_used": gw_response.get("model"),
+        "agent": AgentResponse.from_orm_agent(agent).model_dump(mode="json"),
+    }

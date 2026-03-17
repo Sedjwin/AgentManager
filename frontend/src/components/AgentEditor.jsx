@@ -90,9 +90,11 @@ export default function AgentEditor({ agentId, onBack, onDeleted }) {
         throw new Error(body)
       }
       const result = await r.json()
-      // Re-fetch so all tabs reflect generated values
-      await fetchAgent()
-      const model = result.model_used ? ` (${result.model_used.split('/').pop()})` : ''
+      // Apply the returned agent directly — no second round-trip needed
+      if (result.agent) {
+        setData(result.agent)
+        setDirty(false)
+      }
       setSaved('ok')
       setTimeout(() => setSaved(null), 3000)
     } catch (e) {
