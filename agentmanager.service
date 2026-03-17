@@ -1,0 +1,21 @@
+[Unit]
+Description=AgentManager — AI agent lifecycle and orchestration
+After=network-online.target
+
+[Service]
+Type=simple
+User=sedjwin
+Group=sedjwin
+WorkingDirectory=/home/sedjwin/AgentManager
+ExecStart=/home/sedjwin/AgentManager/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8003 \
+    --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agentmanager
+
+[Install]
+WantedBy=multi-user.target
