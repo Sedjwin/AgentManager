@@ -53,11 +53,13 @@ export default function AgentEditor({ agentId, onBack, onDeleted }) {
       setData(fresh)
       setDirty(false)
       setSaved('ok')
-      if (isNew) onBack()       // return to list after create
+      if (isNew) onBack()
       setTimeout(() => setSaved(null), 3000)
+      return true
     } catch (e) {
       setSaved('err')
       setSaveError(e.message)
+      return false
     }
   }
 
@@ -69,18 +71,33 @@ export default function AgentEditor({ agentId, onBack, onDeleted }) {
 
   async function handleGenerate(quality) {
     if (!agentId || isNew) return
+
+    // Save first so the AI sees the latest form state (name, bio, description, etc.)
+    if (dirty) {
+      const ok = await save()
+      if (!ok) return   // abort if save failed
+    }
+
     setGenerating(quality)
     try {
       const r = await fetch(`/agents/${agentId}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quality, aspect: 'all' }),
+        body: JSON.stringify({ quality }),
       })
-      if (!r.ok) throw new Error(await r.text())
-      // Backend already persisted; re-fetch
+      if (!r.ok) {
+        const body = await r.text()
+        throw new Error(body)
+      }
+      const result = await r.json()
+      // Re-fetch so all tabs reflect generated values
       await fetchAgent()
+      const model = result.model_used ? ` (${result.model_used.split('/').pop()})` : ''
+      setSaved('ok')
+      setTimeout(() => setSaved(null), 3000)
     } catch (e) {
-      alert(`Generation failed: ${e.message}`)
+      setSaveError(`AI generation failed: ${e.message}`)
+      setSaved('err')
     } finally {
       setGenerating(null)
     }
