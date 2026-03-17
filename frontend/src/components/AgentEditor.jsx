@@ -70,7 +70,12 @@ export default function AgentEditor({ agentId, onBack, onDeleted }) {
   }
 
   async function handleGenerate(quality) {
-    if (!agentId || isNew) return
+    if (!agentId || isNew) {
+      setSaveError('Save the agent first before using AI generation.')
+      setSaved('err')
+      setTimeout(() => setSaved(null), 3000)
+      return
+    }
 
     // Save first so the AI sees the latest form state (name, bio, description, etc.)
     if (dirty) {

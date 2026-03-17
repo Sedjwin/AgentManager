@@ -12,12 +12,10 @@ export default function SetupTab({ data, onChange }) {
 
   async function fetchModels() {
     try {
-      // Proxy through Dashboard: /api/gateway/v1/models
-      // But we're on AgentManager's own frontend, so call AIGateway admin directly
-      const r = await fetch('http://localhost:8001/admin/models').catch(() => null)
+      const r = await fetch('/setup/models').catch(() => null)
       if (r?.ok) {
         const data = await r.json()
-        setModels(data.filter(m => m.enabled).map(m => ({ id: m.model_id, name: m.name, provider: m.provider })))
+        setModels(data.map(m => ({ id: m.id, name: m.id, provider: m.provider })))
       }
     } catch { /* best-effort */ }
   }

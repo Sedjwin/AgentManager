@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .config import settings
 from .database import init_db
 from .routers import agents, chat, generate
 
@@ -42,6 +43,21 @@ app.include_router(generate.router)
 @app.get("/health", include_in_schema=False)
 async def health():
     return {"status": "ok", "service": "AgentManager"}
+
+
+@app.get("/setup/models", include_in_schema=False)
+async def setup_models():
+    """Proxy AIGateway model list server-side to avoid browser Private Network Access prompts."""
+    from .services.aigateway import AIGatewayClient
+    key = settings.system_gateway_key
+    if not key:
+        return []
+    try:
+        client = AIGatewayClient(key)
+        models = await client.list_models()
+        return [{"id": m["id"], "provider": m.get("owned_by", "")} for m in models]
+    except Exception:
+        return []
 
 
 # ── Serve React frontend ──────────────────────────────────────────────────────
