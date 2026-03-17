@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     # with smart routing enabled — separate from per-agent gateway tokens)
     system_gateway_key: str = ""
 
+    # X-Admin-Key header sent to AIGateway admin endpoints
+    aigateway_admin_key: str = ""
+
     class Config:
         env_file = ".env"
 
