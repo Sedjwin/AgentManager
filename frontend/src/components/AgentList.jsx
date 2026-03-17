@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Bot, Mic, Volume2, Zap, ZapOff, Trash2 } from 'lucide-react'
+import { Plus, Bot, Mic, Volume2, Zap, ZapOff, Trash2, MessageCircle } from 'lucide-react'
 import AvatarCanvas from './AvatarCanvas'
 
-export default function AgentList({ onSelect, onCreate }) {
+export default function AgentList({ onSelect, onCreate, onChat }) {
   const [agents, setAgents] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(null)
@@ -68,6 +68,7 @@ export default function AgentList({ onSelect, onCreate }) {
               agent={a}
               onSelect={() => onSelect(a.id)}
               onDelete={(e) => handleDelete(e, a.id)}
+              onChat={(e) => { e.stopPropagation(); onChat(a) }}
               deleting={deleting === a.id}
             />
           ))}
@@ -77,7 +78,7 @@ export default function AgentList({ onSelect, onCreate }) {
   )
 }
 
-function AgentCard({ agent, onSelect, onDelete, deleting }) {
+function AgentCard({ agent, onSelect, onDelete, onChat, deleting }) {
   const spec = safeJson(agent.avatar_spec)
 
   return (
@@ -123,6 +124,18 @@ function AgentCard({ agent, onSelect, onDelete, deleting }) {
             {agent.accepts_attachments && <Badge label="files" color="gray" />}
             {agent.accepts_images     && <Badge label="images" color="gray" />}
           </div>
+
+          {/* Chat Now button */}
+          {agent.enabled && agent.gateway_token && (
+            <button
+              onClick={onChat}
+              className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                bg-amber-500/10 border border-amber-500/30 text-amber-400
+                hover:bg-amber-500/20 hover:border-amber-500/50 transition-all"
+            >
+              <MessageCircle size={12} /> Chat Now
+            </button>
+          )}
         </div>
       </div>
     </div>
