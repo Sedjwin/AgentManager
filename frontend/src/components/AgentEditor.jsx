@@ -135,6 +135,20 @@ export default function AgentEditor({ agentId, onBack, onDeleted }) {
             </label>
           )}
 
+          {/* Demo playground visibility toggle */}
+          {!isNew && (
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-500">
+              <button
+                type="button"
+                onClick={() => setField('demo_playground_enabled', !data.demo_playground_enabled)}
+                className={`relative w-8 h-4 rounded-full transition-colors ${data.demo_playground_enabled ? 'bg-amber-500' : 'bg-gray-700'}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${data.demo_playground_enabled ? 'translate-x-4' : ''}`} />
+              </button>
+              Demo playground
+            </label>
+          )}
+
           {/* Delete */}
           {!isNew && (
             <button onClick={handleDelete} className="text-gray-600 hover:text-red-400 transition-colors p-1">
@@ -266,6 +280,7 @@ function defaultAgent() {
     accepts_attachments: false,
     accepts_images: false,
     voice: 'glados',
+    demo_playground_enabled: true,
     voice_speed: 1.0,
     noise_scale: 0.333,
     noise_w: 0.333,

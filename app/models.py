@@ -32,6 +32,7 @@ class Agent(Base):
     accepts_attachments: Mapped[bool] = Column(Boolean, default=False)
     accepts_images: Mapped[bool] = Column(Boolean, default=False)
     enabled: Mapped[bool] = Column(Boolean, default=True)
+    demo_playground_enabled: Mapped[bool] = Column(Boolean, default=True)
 
     # Voice
     voice: Mapped[str] = Column(String(32), default="glados")
@@ -62,6 +63,7 @@ class AgentCreate(BaseModel):
     accepts_attachments: bool = False
     accepts_images: bool = False
     enabled: bool = True
+    demo_playground_enabled: bool = True
     voice: str = "glados"
     voice_speed: float = 1.0
     noise_scale: float = 0.333
@@ -83,6 +85,7 @@ class AgentUpdate(BaseModel):
     accepts_attachments: Optional[bool] = None
     accepts_images: Optional[bool] = None
     enabled: Optional[bool] = None
+    demo_playground_enabled: Optional[bool] = None
     voice: Optional[str] = None
     voice_speed: Optional[float] = None
     noise_scale: Optional[float] = None
@@ -106,6 +109,7 @@ class AgentResponse(BaseModel):
     accepts_attachments: bool
     accepts_images: bool
     enabled: bool
+    demo_playground_enabled: bool
     voice: str
     voice_speed: float
     noise_scale: float
@@ -135,6 +139,7 @@ class AgentResponse(BaseModel):
             "accepts_attachments": agent.accepts_attachments,
             "accepts_images": agent.accepts_images,
             "enabled": agent.enabled,
+            "demo_playground_enabled": agent.demo_playground_enabled,
             "voice": agent.voice,
             "voice_speed": agent.voice_speed,
             "noise_scale": agent.noise_scale,
@@ -179,6 +184,7 @@ def apply_create(schema: AgentCreate) -> Agent:
         accepts_attachments=schema.accepts_attachments,
         accepts_images=schema.accepts_images,
         enabled=schema.enabled,
+        demo_playground_enabled=schema.demo_playground_enabled,
         voice=schema.voice,
         voice_speed=schema.voice_speed,
         noise_scale=schema.noise_scale,

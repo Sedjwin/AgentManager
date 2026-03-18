@@ -4,8 +4,31 @@ import json
 import re
 import time
 
+import httpx
+
 from .aigateway import AIGatewayClient
 from .voice import VoiceClient
+
+_EPAPER_URL = "http://localhost:8004"
+
+
+async def _push_display(agent_name: str, clean_text: str, color: str) -> None:
+    """Fire-and-forget: send agent response to the e-ink display."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"{_EPAPER_URL}/api/show",
+                json={
+                    "type": "message",
+                    "agent": agent_name,
+                    "title": "",
+                    "body": clean_text,
+                    "color": color,
+                    "duration": 600,   # 10 min, then revert to idle
+                },
+            )
+    except Exception:
+        pass   # display is optional; never fail a chat because of it
 
 EMOTION_TTS_PARAMS: dict[str, dict | None] = {
     "ANGRY":     {"speed": 1.1,  "noise_scale": 0.8,  "noise_w": 0.6},
@@ -121,6 +144,16 @@ async def orchestrate(
     tags, clean_text = extract_tags(response_text)
     emotion = _resolve_emotion(tags)
     actions = [t for t in tags if t.split(":")[0].upper() not in _EMOTION_TAGS]
+
+    # ── 4a. E-ink display action ───────────────────────────────────────────────
+    # Agent includes [DISPLAY] or [DISPLAY:color] to push its response to the screen.
+    for action in actions:
+        base, _, param = action.partition(":")
+        if base.upper() == "DISPLAY":
+            color = param.lower() if param in ("blue", "green", "red", "yellow", "black") else "blue"
+            import asyncio
+            asyncio.create_task(_push_display(agent.name, clean_text, color))
+            break
 
     # ── 5. TTS ─────────────────────────────────────────────────────────────────
     tts_params = _tts_params_for_emotion(emotion, agent)
