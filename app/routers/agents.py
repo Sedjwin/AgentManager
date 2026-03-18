@@ -63,11 +63,12 @@ async def update_agent(
     await db.commit()
     await db.refresh(agent)
 
-    # Sync routing policy with AIGateway (best-effort)
+    # Sync name, description, and routing policy with AIGateway (best-effort)
     if agent.gateway_token:
         await admin_sync_agent(
             gateway_token=agent.gateway_token,
             name=agent.name,
+            bio=agent.bio or "",
             smart_routing=agent.smart_routing,
             preferred_model=agent.default_model or "",
         )

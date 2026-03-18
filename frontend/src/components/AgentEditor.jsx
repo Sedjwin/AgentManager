@@ -156,18 +156,6 @@ export default function AgentEditor({ agentId, onBack, onDeleted }) {
             </button>
           )}
 
-          {/* Register gateway */}
-          {!isNew && !data.gateway_token && (
-            <button
-              onClick={async () => {
-                await fetch(`/agents/${agentId}/register-gateway`, { method: 'POST' })
-                fetchAgent()
-              }}
-              className="flex items-center gap-1.5 text-xs text-amber-500 hover:text-amber-400 border border-amber-500/30 px-2 py-1 rounded"
-            >
-              <RefreshCw size={12} /> Register AIGateway
-            </button>
-          )}
 
           {/* Save */}
           <button
@@ -259,7 +247,7 @@ export default function AgentEditor({ agentId, onBack, onDeleted }) {
           {/* Tab content */}
           <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
             {activeTab === 'Identity'    && <IdentityTab    data={data} onChange={setField} />}
-            {activeTab === 'Setup'       && <SetupTab       data={data} onChange={setField} />}
+            {activeTab === 'Setup'       && <SetupTab       data={data} onChange={setField} onRegisterGateway={!isNew ? async () => { await fetch(`/agents/${agentId}/register-gateway`, { method: 'POST' }); fetchAgent() } : null} />}
             {activeTab === 'Personality' && <PersonalityTab data={data} onChange={setField} onGenerate={handleGenerate} generating={generating} />}
           </div>
         </div>

@@ -56,8 +56,8 @@ async def admin_register_agent(name: str, bio: str, smart_routing: bool, preferr
         return r.json()["api_key"]
 
 
-async def admin_sync_agent(gateway_token: str, name: str, smart_routing: bool, preferred_model: str) -> None:
-    """Update AIGateway routing policy for an existing agent (best-effort)."""
+async def admin_sync_agent(gateway_token: str, name: str, bio: str, smart_routing: bool, preferred_model: str) -> None:
+    """Update AIGateway name, description, and routing policy for an existing agent (best-effort)."""
     base = settings.aigateway_url
     headers = _admin_headers()
     try:
@@ -70,12 +70,14 @@ async def admin_sync_agent(gateway_token: str, name: str, smart_routing: bool, p
                     await client.put(
                         f"{base}/admin/agents/{a['id']}",
                         json={
+                            "name": name,
+                            "description": bio or "Managed by AgentManager",
                             "permissions": {
                                 "allowed_providers": ["all"],
                                 "allowed_models": [],
                                 "default_model": preferred_model or "",
                                 "auto_route": smart_routing,
-                            }
+                            },
                         },
                         headers=headers,
                     )

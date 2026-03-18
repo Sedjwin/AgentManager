@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import { Wrench, ChevronDown, ChevronRight } from 'lucide-react'
+import { Wrench, Eye, EyeOff, RefreshCw } from 'lucide-react'
 
-export default function SetupTab({ data, onChange }) {
+export default function SetupTab({ data, onChange, onRegisterGateway }) {
   const [models, setModels] = useState([])
+  const [showToken, setShowToken] = useState(false)
 
   useEffect(() => {
     fetch('/agents')   // just for warming; models come from AIGateway
@@ -22,6 +23,45 @@ export default function SetupTab({ data, onChange }) {
 
   return (
     <div className="space-y-6">
+      {/* Gateway Token */}
+      <div>
+        <div className="flex items-baseline justify-between mb-1.5">
+          <label className="text-xs text-gray-400">AIGateway Token</label>
+          <span className="text-xs text-gray-600">Bearer token used for all LLM and tool calls</span>
+        </div>
+        <div className="flex gap-2 items-center">
+          <div className="relative flex-1">
+            <input
+              type={showToken ? 'text' : 'password'}
+              value={data.gateway_token || ''}
+              onChange={e => onChange('gateway_token', e.target.value)}
+              placeholder="Paste AIGateway api_key, or use Re-register →"
+              className="font-mono text-xs w-full pr-8"
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken(v => !v)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400"
+            >
+              {showToken ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+          </div>
+          {onRegisterGateway && (
+            <button
+              type="button"
+              onClick={onRegisterGateway}
+              className="flex items-center gap-1.5 text-xs text-amber-500 hover:text-amber-400 border border-amber-500/30 px-2 py-1.5 rounded whitespace-nowrap"
+              title="Create or refresh this agent's entry in AIGateway"
+            >
+              <RefreshCw size={12} /> Re-register
+            </button>
+          )}
+        </div>
+        {!data.gateway_token && (
+          <p className="text-xs text-red-400/70 mt-1">No token set — LLM and tool calls will fail until registered.</p>
+        )}
+      </div>
+
       {/* System prompt */}
       <div>
         <div className="flex items-baseline justify-between mb-1.5">
