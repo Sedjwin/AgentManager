@@ -23,7 +23,7 @@ class GenerateRequest(BaseModel):
 _PROMPT = """\
 You are configuring an AI agent. Read all current settings carefully, then generate \
 improved coherent values for every field. Make everything consistent — name, personality, \
-voice, colours, and behaviours should feel like one unified character.
+voice, colours, DNA traits, and emotional states should feel like one unified character.
 
 === CURRENT SETTINGS ===
 Name:                   {name}
@@ -42,20 +42,35 @@ Avatar spec:            {avatar_spec}
 Rules:
 - Keep the name as-is.
 - If personality_description is vague or empty, invent a coherent one based on name/bio.
-- system_prompt should be 2-4 sentences written in first person, defining role + constraints.
-- traits: 3-5 single words or short phrases (e.g. "sardonic", "methodical", "darkly witty").
-- emotions: one word each for idle/processing/speaking/error states.
-- avatar colours should match the personality (e.g. cold=cyan/blue, warm=amber/orange, sinister=red/purple).
-- voice: "glados" (robotic, female, dry) or "atlas" (professional, male, neutral).
-- voice_speed: 0.8–1.3. noise_scale/noise_w: 0.1–0.8.
-- idle_animation: "scanning" for alert/robotic, "breathing" for organic/calm, "pulsing" for energetic, "flickering" for unstable.
+- system_prompt: 2-4 sentences in first person, defining role and constraints. Append one sentence listing the agent's emotion tags like: "Express state using tags: [CALM] [CURIOUS] [DELIGHTED]"
+- traits: 3-6 single words or short phrases (e.g. "sardonic", "methodical", "darkly witty").
+- emotions: a free-form dictionary of 3-6 named emotional states unique to this character.
+  Each emotion maps to performance parameters:
+    energy        0.0–1.0  (0=lethargic, 1=frantic)
+    valence       -1.0–1.0 (negative=unhappy, positive=happy)
+    eye_openness  0.0–1.0  (0=half-closed, 1=wide open)
+    mouth_curve   -1.0–1.0 (negative=frown, positive=smile)
+  Choose emotion names that suit the character (e.g. for GLaDOS: "sardonic", "triumphant", "disappointed").
+- avatar colours should match personality (cold=cyan/blue, warm=amber/orange, sinister=red/purple, mechanical=gray/white).
+- avatar_spec.dna: personality DNA (4 floats 0.0–1.0):
+    energy       overall animation pace and intensity
+    warmth       colour temperature and ambient glow warmth
+    confidence   eye scale and assertiveness
+    erraticness  jitter and instability in idle animation
+- voice options: "glados" (robotic female, dry humour), "atlas" (professional male, neutral),
+  "jarvis" (warm British male, sophisticated butler), "tars" (direct US male, efficient wit).
+- voice_speed: 0.8–1.3. noise_scale/noise_w: 0.1–0.8 (GLaDOS only; use 0.333 for others).
+- idle_animation: "scanning" (alert/robotic), "breathing" (organic/calm), "pulsing" (energetic), "flickering" (unstable).
 
 Return ONLY valid JSON with exactly these fields — no explanation, no markdown:
 {{
   "personality_description": "...",
   "system_prompt": "...",
   "traits": ["...", "..."],
-  "emotions": {{"idle": "...", "processing": "...", "speaking": "...", "error": "..."}},
+  "emotions": {{
+    "emotion_name": {{"energy": 0.5, "valence": 0.0, "eye_openness": 0.7, "mouth_curve": 0.0}},
+    "emotion_name2": {{"energy": 0.8, "valence": 0.7, "eye_openness": 1.0, "mouth_curve": 0.6}}
+  }},
   "avatar_spec": {{
     "color_primary": "#rrggbb",
     "color_secondary": "#rrggbb",
@@ -63,9 +78,15 @@ Return ONLY valid JSON with exactly these fields — no explanation, no markdown
     "face_theme": "mechanical|organic|abstract|minimal",
     "eye_style": "angular|circular|compound|visor",
     "mouth_style": "thin|wide|segmented|aperture",
-    "idle_animation": "breathing|scanning|pulsing|flickering"
+    "idle_animation": "breathing|scanning|pulsing|flickering",
+    "dna": {{
+      "energy": 0.5,
+      "warmth": 0.5,
+      "confidence": 0.7,
+      "erraticness": 0.1
+    }}
   }},
-  "voice": "glados|atlas",
+  "voice": "glados|atlas|jarvis|tars",
   "voice_speed": 1.0,
   "noise_scale": 0.333,
   "noise_w": 0.333

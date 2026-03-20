@@ -205,14 +205,16 @@ export default function AgentEditor({ agentId, onBack, onDeleted }) {
           )}
 
           {/* Emotion preview */}
-          {safeObj(data.emotions).idle && (
-            <div className="w-full text-xs text-gray-600 space-y-1">
-              {Object.entries(safeObj(data.emotions)).map(([k, v]) => (
-                <div key={k} className="flex justify-between">
-                  <span className="text-gray-700 capitalize">{k}</span>
-                  <span className="text-gray-500">{v}</span>
-                </div>
-              ))}
+          {Object.keys(safeObj(data.emotions)).length > 0 && (
+            <div className="w-full">
+              <p className="text-xs text-gray-700 mb-1">Emotions</p>
+              <div className="flex flex-wrap gap-1">
+                {Object.keys(safeObj(data.emotions)).map(name => (
+                  <span key={name} className="text-xs font-mono bg-gray-800/60 text-gray-500 px-1.5 py-0.5 rounded">
+                    [{name.toUpperCase()}]
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -274,7 +276,7 @@ function defaultAgent() {
     noise_w: 0.333,
     personality_description: '',
     traits: [],
-    emotions: { idle: 'neutral', processing: 'focused', speaking: 'engaged', error: 'irritated' },
+    emotions: {},
     avatar_spec: {
       color_primary: '#22d3ee',
       color_secondary: '#0f172a',
@@ -283,6 +285,7 @@ function defaultAgent() {
       eye_style: 'angular',
       mouth_style: 'segmented',
       idle_animation: 'scanning',
+      dna: { energy: 0.5, warmth: 0.5, confidence: 0.7, erraticness: 0.1 },
     },
   }
 }
