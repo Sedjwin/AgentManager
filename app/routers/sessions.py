@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ router = APIRouter(tags=["sessions"])
 @router.post("/agents/{agent_id}/session", response_model=SessionOut)
 async def start_session(
     agent_id: str,
+    request: Request,
     body: DeviceCapabilities | None = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -35,7 +36,9 @@ async def start_session(
         raise HTTPException(404, "Agent not found")
 
     caps = body.model_dump() if body else {}
-    session = session_manager.create(agent_id, caps)
+    user_id  = request.headers.get("X-User-Id")
+    username = request.headers.get("X-Username")
+    session = session_manager.create(agent_id, caps, user_id=user_id, username=username)
 
     profile = json.loads(agent.profile) if agent.profile else None
     return SessionOut(

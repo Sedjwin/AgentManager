@@ -1,10 +1,26 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, RefreshCw, Bot, Mic, User, Trash2, Edit2, AlertCircle } from 'lucide-react'
 import { listAgents, deleteAgent } from './api.js'
+import { useAuth } from './AuthContext'
 import AgentModal from './AgentModal.jsx'
 import AgentDetail from './AgentDetail.jsx'
+import LoginScreen from './LoginScreen.jsx'
+import UserPill from './UserPill.jsx'
 
 export default function App() {
+  const { user, loading, logout } = useAuth()
+
+  if (loading) return (
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+  if (!user) return <LoginScreen />
+
+  return <AgentApp user={user} logout={logout} />
+}
+
+function AgentApp({ user, logout }) {
   const [agents, setAgents]           = useState([])
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState(null)
@@ -65,6 +81,7 @@ export default function App() {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold transition-colors">
             <Plus className="w-3.5 h-3.5" /> New Agent
           </button>
+          <UserPill user={user} onLogout={logout} />
         </div>
       </header>
 

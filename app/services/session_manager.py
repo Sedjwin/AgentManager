@@ -1,4 +1,6 @@
-"""In-memory session store. Sessions are ephemeral — not persisted across restarts."""
+"""In-memory session store. Sessions are ephemeral — not persisted across restarts.
+Each session has a SessionLogger that writes to disk immediately.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -6,12 +8,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.services.session_logger import SessionLogger
+
 
 @dataclass
 class Session:
     session_id: str
     agent_id: str
     device_capabilities: dict[str, Any]
+    logger: SessionLogger
     history: list[dict[str, str]] = field(default_factory=list)
     interrupted: bool = False
     _interrupt_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -33,12 +38,21 @@ class SessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
 
-    def create(self, agent_id: str, device_capabilities: dict[str, Any]) -> Session:
+    def create(
+        self,
+        agent_id: str,
+        device_capabilities: dict[str, Any],
+        user_id: str | None = None,
+        username: str | None = None,
+    ) -> Session:
         sid = str(uuid.uuid4())
+        logger = SessionLogger(agent_id, sid)
+        logger.init(user_id, username, device_capabilities)
         session = Session(
             session_id=sid,
             agent_id=agent_id,
             device_capabilities=device_capabilities,
+            logger=logger,
         )
         self._sessions[sid] = session
         return session
