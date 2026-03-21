@@ -39,11 +39,13 @@ class VoiceClient:
             "noise_scale": noise_scale,
             "noise_w": noise_w,
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.post(
                 f"{self.base_url}/tts",
                 json=payload,
             )
+            if not r.is_success:
+                raise RuntimeError(f"TTS error {r.status_code} (voice={voice!r}): {r.text[:200]}")
             r.raise_for_status()
             data = r.json()
             return {

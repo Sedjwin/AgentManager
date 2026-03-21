@@ -192,11 +192,18 @@ async def orchestrate(
     # ── 5. TTS ─────────────────────────────────────────────────────────────────
     tts_params = _tts_params_for_emotion(emotion_params, agent)
     t0 = time.monotonic()
-    tts_result = await voice_client.synthesize(
-        text=clean_text,
-        voice=agent.voice,
-        **tts_params,
-    )
+    try:
+        tts_result = await voice_client.synthesize(
+            text=clean_text,
+            voice=agent.voice,
+            **tts_params,
+        )
+    except Exception as tts_err:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(
+            status_code=502,
+            detail=f"TTS failed (voice={agent.voice!r}): {tts_err}"
+        ) from tts_err
     stats["t_tts_ms"] = round((time.monotonic() - t0) * 1000)
     stats["audio_duration_ms"] = tts_result.get("duration_ms", 0)
 
