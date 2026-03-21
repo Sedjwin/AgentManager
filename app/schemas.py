@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, field_validator
+
+
+# ── Agent schemas ────────────────────────────────────────────────────────────
+
+class AgentCreate(BaseModel):
+    name: str
+    ai_gateway_token: str
+    system_prompt: str = ""
+    voice_enabled: bool = False
+    voice_config: dict[str, Any] | None = None
+    profile: dict[str, Any] | None = None
+
+
+class AgentUpdate(BaseModel):
+    name: str | None = None
+    ai_gateway_token: str | None = None
+    system_prompt: str | None = None
+    voice_enabled: bool | None = None
+    voice_config: dict[str, Any] | None = None
+    profile: dict[str, Any] | None = None
+
+
+class AgentOut(BaseModel):
+    agent_id: str
+    name: str
+    system_prompt: str
+    voice_enabled: bool
+    voice_config: dict[str, Any] | None = None
+    profile: dict[str, Any] | None = None
+    has_profile: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+    @field_validator("has_profile", mode="before")
+    @classmethod
+    def compute_has_profile(cls, v: Any) -> bool:
+        return bool(v)
+
+
+class AgentListItem(BaseModel):
+    agent_id: str
+    name: str
+    voice_enabled: bool
+    has_profile: bool
+    system_prompt: str
+    profile: dict[str, Any] | None = None
+    voice_config: dict[str, Any] | None = None
+
+    model_config = {"from_attributes": True}
+
+
+# ── Session schemas ──────────────────────────────────────────────────────────
+
+class DeviceCapabilities(BaseModel):
+    device_id: str | None = None
+    capabilities: dict[str, Any] = {}
+
+
+class SessionOut(BaseModel):
+    session_id: str
+    agent_id: str
+    type: str  # "interaction" or "functional"
+    profile: dict[str, Any] | None = None
+
+
+# ── Message / response schemas ───────────────────────────────────────────────
+
+class TextMessage(BaseModel):
+    text: str
+    history: list[dict[str, str]] = []
+
+
+class TimelineEvent(BaseModel):
+    t: int          # milliseconds from start of audio
+    type: str       # "emotion" | "action" | "viseme"
+    value: str | int
+
+
+class AgentResponse(BaseModel):
+    session_id: str
+    text: str                               # clean text (tags stripped)
+    transcript: str | None = None           # if input was audio
+    audio: str | None = None               # base64 WAV
+    duration_ms: int | None = None
+    sample_rate: int | None = None
+    buffer_bytes: int | None = None
+    timeline: list[TimelineEvent] = []
+    chunk_index: int = 0
+    is_final: bool = True
+
+
+class InterruptRequest(BaseModel):
+    session_id: str
