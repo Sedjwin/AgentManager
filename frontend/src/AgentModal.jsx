@@ -1,8 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Save, Loader } from 'lucide-react'
 import { createAgent, updateAgent } from './api.js'
-
-const VOICES = ['glados', 'atlas']
 
 function Field({ label, children, hint }) {
   return (
@@ -69,6 +67,14 @@ export default function AgentModal({ agent, onClose, onSaved }) {
   const [voiceId, setVoiceId]         = useState(agent?.voice_config?.voice_id ?? 'glados')
   const [baseSpeed, setBaseSpeed]     = useState(agent?.voice_config?.base_speed ?? 0.5)
   const [basePitch, setBasePitch]     = useState(agent?.voice_config?.base_pitch ?? 0.5)
+  const [voices, setVoices]           = useState(['glados'])
+
+  useEffect(() => {
+    fetch('/voices')
+      .then(r => r.json())
+      .then(data => setVoices(data.voices.map(v => v.id)))
+      .catch(() => {})
+  }, [])
 
   const [hasProfile, setHasProfile]   = useState(!!agent?.profile)
   const [displayName, setDisplayName] = useState(agent?.profile?.display_name ?? '')
@@ -202,7 +208,7 @@ export default function AgentModal({ agent, onClose, onSaved }) {
                 <Field label="Voice">
                   <select value={voiceId} onChange={e => setVoiceId(e.target.value)}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-amber-500">
-                    {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                    {voices.map(v => <option key={v} value={v}>{v}</option>)}
                   </select>
                 </Field>
                 <Slider label="Base Speed" value={baseSpeed} onChange={setBaseSpeed} />

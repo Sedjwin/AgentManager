@@ -1,10 +1,12 @@
 import os
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.config import settings
 from app.database import init_db
 from app.routers import agents, sessions
 from app.seed import seed_glados, seed_tars
@@ -37,6 +39,15 @@ app.include_router(sessions.router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "AgentManager"}
+
+
+@app.get("/voices")
+async def list_voices():
+    """Proxy VoiceService /voices so the frontend always reflects what's actually available."""
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{settings.voiceservice_url}/voices", timeout=5.0)
+        r.raise_for_status()
+    return r.json()
 
 
 # Serve admin UI at / — must come after API routes

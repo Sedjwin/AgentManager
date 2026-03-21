@@ -37,7 +37,7 @@ async def synthesize(text: str, voice_config: dict[str, Any] | None) -> dict[str
 
     payload: dict[str, Any] = {"text": text, "voice": voice_id, "speed": speed}
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=600.0) as client:
         resp = await client.post(
             f"{settings.voiceservice_url}/tts",
             json=payload,
