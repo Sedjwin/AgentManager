@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react'
-import { ArrowLeft, Send, Mic, MicOff, Volume2, VolumeX, Square } from 'lucide-react'
+import React, { useState, useRef, useEffect } from 'react'
+import { ArrowLeft, Send, Mic, MicOff, Volume2, VolumeX, Square, ChevronDown } from 'lucide-react'
 import AvatarCanvas from './AvatarCanvas'
 
 const MIC_AVAILABLE = !!(navigator.mediaDevices?.getUserMedia)
@@ -13,7 +13,7 @@ async function b64ToAudioBuffer(b64, audioCtx) {
 
 function safeJson(v) {
   if (!v) return {}
-  if (typeof v === 'object') return v
+  if (typeof v === 'object' && !Array.isArray(v)) return v
   try { return JSON.parse(v) } catch { return {} }
 }
 
@@ -21,15 +21,36 @@ function capitalize(s) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ''
 }
 
-const EMOTION_COLOR = {
-  HAPPY:     'text-yellow-400',
-  EXCITED:   'text-orange-400',
-  ANGRY:     'text-red-400',
-  SAD:       'text-blue-400',
-  CALM:      'text-teal-400',
-  SARCASTIC: 'text-purple-400',
-  CONFUSED:  'text-pink-400',
-  NEUTRAL:   'text-gray-400',
+const EMOTION_STYLES = {
+  HAPPY:     'text-yellow-400 bg-yellow-400/15 border-yellow-500/30',
+  EXCITED:   'text-orange-400 bg-orange-400/15 border-orange-500/30',
+  ANGRY:     'text-red-400    bg-red-400/15    border-red-500/30',
+  SAD:       'text-blue-400   bg-blue-400/15   border-blue-500/30',
+  CALM:      'text-teal-400   bg-teal-400/15   border-teal-500/30',
+  SARCASTIC: 'text-purple-400 bg-purple-400/15 border-purple-500/30',
+  CONFUSED:  'text-pink-400   bg-pink-400/15   border-pink-500/30',
+  NEUTRAL:   'text-gray-400   bg-gray-400/10   border-gray-600/30',
+}
+
+const ANIM_STATE_STYLE = {
+  idle:       'bg-gray-600',
+  processing: 'bg-amber-400 animate-pulse',
+  speaking:   'bg-green-400 animate-pulse',
+}
+
+// Mini horizontal bar for a -1..1 or 0..1 param
+function ParamBar({ value, min = 0, max = 1 }) {
+  const pct = Math.round(((value - min) / (max - min)) * 100)
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
+        <div className="h-full bg-amber-500/70 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs font-mono text-gray-500 w-9 text-right shrink-0">
+        {value >= 0 ? '+' : ''}{value.toFixed(2)}
+      </span>
+    </div>
+  )
 }
 
 function Toggle({ value, onChange, label }) {
@@ -47,7 +68,9 @@ function Toggle({ value, onChange, label }) {
   )
 }
 
-export default function AgentChat({ agent, onBack }) {
+export default function AgentChat({ agent: initialAgent, onBack }) {
+  const [allAgents, setAllAgents]       = useState([initialAgent])
+  const [agent, setAgent]               = useState(initialAgent)
   const [messages, setMessages]         = useState([])
   const [input, setInput]               = useState('')
   const [loading, setLoading]           = useState(false)
@@ -58,7 +81,8 @@ export default function AgentChat({ agent, onBack }) {
   const [playing, setPlaying]           = useState(false)
   const [recording, setRecording]       = useState(false)
   const [avatarState, setAvatarState]   = useState('idle')
-  const [currentEmotion, setCurrentEmotion] = useState(null)
+  const [currentEmotion, setCurrentEmotion] = useState(null) // {name, params}
+  const [lastStats, setLastStats]       = useState(null)
 
   const audioCtxRef   = useRef(null)
   const currentSrcRef = useRef(null)
@@ -68,10 +92,17 @@ export default function AgentChat({ agent, onBack }) {
   const analyserRef   = useRef(null)
   const silenceRafRef = useRef(null)
 
-  const spec     = safeJson(agent.avatar_spec)
-  const emotions = safeJson(agent.emotions)
+  // Load full agent list for selector
+  useEffect(() => {
+    fetch('/agents')
+      .then(r => r.json())
+      .then(list => setAllAgents(list.filter(a => a.enabled && a.gateway_token)))
+      .catch(() => {})
+  }, [])
 
-  // Adjust animation for current state
+  const spec = safeJson(agent.avatar_spec)
+
+  // Override idle_animation based on avatar state
   const liveSpec = {
     ...spec,
     idle_animation:
@@ -80,10 +111,15 @@ export default function AgentChat({ agent, onBack }) {
       spec.idle_animation,
   }
 
-  // Mood word shown under avatar
-  const moodWord = currentEmotion
-    ? capitalize(currentEmotion)
-    : capitalize(emotions[avatarState] || avatarState)
+  function switchAgent(newAgent) {
+    if (newAgent.id === agent.id) return
+    setAgent(newAgent)
+    setMessages([])
+    setCurrentEmotion(null)
+    setAvatarState('idle')
+    setLastStats(null)
+    stopAudio()
+  }
 
   function getAudioCtx() {
     if (!audioCtxRef.current || audioCtxRef.current.state === 'closed')
@@ -129,7 +165,7 @@ export default function AgentChat({ agent, onBack }) {
   }
 
   function addMsg(msg) {
-    setMessages(prev => { const n = [...prev, msg]; return n })
+    setMessages(prev => [...prev, msg])
     scrollDown()
   }
 
@@ -142,11 +178,19 @@ export default function AgentChat({ agent, onBack }) {
   }
 
   async function afterResponse(data) {
-    setCurrentEmotion(data.emotion || null)
+    // emotion_params comes directly from orchestrator — use it
+    if (data.emotion && data.emotion_params) {
+      setCurrentEmotion({ name: data.emotion, params: data.emotion_params })
+    } else {
+      setCurrentEmotion(null)
+    }
+    if (data.stats) setLastStats(data.stats)
+
     addMsg({
       role: 'assistant',
       content: data.clean_text || '(no response)',
       emotion: data.emotion,
+      actions: data.actions || [],
       stats: data.stats,
     })
     if (wantVoice && data.audio_b64) {
@@ -193,7 +237,6 @@ export default function AgentChat({ agent, onBack }) {
       const r = await fetch(`/agents/${agent.id}/chat`, { method: 'POST', body: fd })
       if (!r.ok) throw new Error(await r.text())
       const data = await r.json()
-
       if (data.transcript) {
         setMessages(prev => {
           const next = [...prev]
@@ -254,62 +297,123 @@ export default function AgentChat({ agent, onBack }) {
     } catch { /* silence detection unavailable */ }
   }
 
+  const emotionStyle = EMOTION_STYLES[currentEmotion?.name?.toUpperCase()] ?? EMOTION_STYLES.NEUTRAL
+
   return (
     <div className="min-h-screen p-6 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6 shrink-0">
-        <button onClick={onBack} className="flex items-center gap-2 text-gray-500 hover:text-white transition-colors text-sm">
+      {/* Header + agent selector */}
+      <div className="flex items-center gap-3 mb-4 shrink-0 flex-wrap gap-y-2">
+        <button onClick={onBack} className="flex items-center gap-2 text-gray-500 hover:text-white transition-colors text-sm shrink-0">
           <ArrowLeft size={16} /> Agents
         </button>
         <span className="text-gray-700">/</span>
-        <span className="text-white font-semibold">{agent.name}</span>
+
+        {/* Agent selector */}
+        <div className="relative flex items-center gap-1">
+          <select
+            value={agent.id}
+            onChange={e => {
+              const a = allAgents.find(x => x.id === parseInt(e.target.value))
+              if (a) switchAgent(a)
+            }}
+            className="appearance-none bg-gray-900 border border-gray-700 rounded-lg pl-3 pr-8 py-1.5
+              text-sm text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer"
+          >
+            {allAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <ChevronDown size={12} className="absolute right-2 text-gray-500 pointer-events-none" />
+        </div>
+
+        {/* Status dot */}
+        <div className="flex items-center gap-1.5 ml-1">
+          <span className={`w-2 h-2 rounded-full ${ANIM_STATE_STYLE[avatarState]}`} />
+          <span className="text-xs text-gray-500 capitalize">{avatarState}</span>
+        </div>
+
+        {agent.gateway_token && (
+          <span className="text-xs text-gray-700 font-mono ml-auto truncate max-w-40" title={agent.gateway_token}>
+            gw: {agent.gateway_token.substring(0, 12)}…
+          </span>
+        )}
       </div>
 
       {/* Body */}
-      <div className="flex gap-6 flex-1 min-h-0">
+      <div className="flex gap-4 flex-1 min-h-0">
 
-        {/* Left: avatar + controls */}
-        <div className="w-48 shrink-0 flex flex-col gap-5">
+        {/* Left: avatar + data panel */}
+        {showAvatar && (
+          <div className="w-52 shrink-0 flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
 
-          {showAvatar && (
-            <div className="flex flex-col items-center gap-3">
-              <AvatarCanvas spec={liveSpec} size={160} animated />
+            {/* Avatar */}
+            <div className="flex flex-col items-center gap-2">
+              <AvatarCanvas spec={liveSpec} size={176} animated currentEmotion={currentEmotion?.params ?? null} />
 
-              {/* Current mood */}
-              <div className="text-center">
-                <p className={`text-base font-semibold tracking-wide ${EMOTION_COLOR[currentEmotion] ?? 'text-gray-300'}`}>
-                  {moodWord}
-                </p>
-              </div>
-
-              {/* Mood state map */}
-              {Object.keys(emotions).length > 0 && (
-                <div className="w-full text-xs font-mono space-y-1 border-t border-gray-800 pt-3">
-                  {Object.entries(emotions).map(([state, word]) => (
-                    <div
-                      key={state}
-                      className={`flex justify-between gap-2 transition-colors ${
-                        avatarState === state ? 'text-amber-400' : 'text-gray-700'
-                      }`}
-                    >
-                      <span className="capitalize">{state}</span>
-                      <span className="text-right">{word}</span>
-                    </div>
-                  ))}
-                </div>
+              {/* Emotion badge */}
+              {currentEmotion?.name ? (
+                <span className={`text-xs px-2 py-0.5 rounded-full border font-medium tracking-wide ${emotionStyle}`}>
+                  {currentEmotion.name.toUpperCase()}
+                </span>
+              ) : (
+                <span className="text-xs text-gray-600 capitalize">{avatarState}</span>
               )}
             </div>
-          )}
 
-          <div className="space-y-3 border-t border-gray-800 pt-4">
-            <Toggle value={showAvatar}   onChange={setShowAvatar}   label="Avatar" />
-            <Toggle value={wantVoice}    onChange={setWantVoice}    label="Voice output" />
-            {wantVoice && (
-              <Toggle value={wantVisemes} onChange={setWantVisemes} label="Visemes" />
+            {/* Emotion params — live data from orchestrator */}
+            {currentEmotion?.params && (
+              <div className="w-full border border-gray-800 rounded-lg p-3 bg-gray-900/40">
+                <p className="text-xs text-gray-600 uppercase tracking-wider mb-2">State params</p>
+                <div className="space-y-2">
+                  {[
+                    { key: 'energy',       label: 'Energy',     min: 0,  max: 1  },
+                    { key: 'valence',      label: 'Mood',       min: -1, max: 1  },
+                    { key: 'eye_openness', label: 'Eyes',       min: 0,  max: 1  },
+                    { key: 'mouth_curve',  label: 'Expression', min: -1, max: 1  },
+                  ].map(({ key, label, min, max }) => {
+                    const v = currentEmotion.params[key] ?? 0
+                    return (
+                      <div key={key}>
+                        <span className="text-xs text-gray-600">{label}</span>
+                        <ParamBar value={v} min={min} max={max} />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             )}
-          </div>
 
-          {wantVoice && (
+            {/* Last response stats */}
+            {lastStats && (
+              <div className="w-full border border-gray-800 rounded-lg p-3 bg-gray-900/40">
+                <p className="text-xs text-gray-600 uppercase tracking-wider mb-2">Last response</p>
+                <div className="space-y-1 text-xs">
+                  <StatRow label="LLM" value={`${lastStats.t_llm_ms}ms`} />
+                  {lastStats.t_tts_ms > 0 && <StatRow label="TTS" value={`${lastStats.t_tts_ms}ms`} />}
+                  {lastStats.t_stt_ms > 0 && <StatRow label="STT" value={`${lastStats.t_stt_ms}ms`} />}
+                  {lastStats.model_used && (
+                    <StatRow
+                      label="Model"
+                      value={lastStats.model_used.split('/').pop().replace(/:.*/, '').substring(0, 18)}
+                      mono
+                    />
+                  )}
+                  {lastStats.completion_tokens > 0 && (
+                    <StatRow label="Tokens" value={`${lastStats.prompt_tokens}↑ ${lastStats.completion_tokens}↓`} />
+                  )}
+                  {lastStats.audio_duration_ms > 0 && (
+                    <StatRow label="Audio" value={`${(lastStats.audio_duration_ms / 1000).toFixed(1)}s`} />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Controls */}
+            <div className="border-t border-gray-800 pt-3 space-y-2.5">
+              <Toggle value={wantVoice}  onChange={setWantVoice}  label="Voice output" />
+              {wantVoice && (
+                <Toggle value={wantVisemes} onChange={setWantVisemes} label="Visemes" />
+              )}
+            </div>
+
             <div className="space-y-2">
               <button
                 onClick={() => setMuted(m => !m)}
@@ -324,16 +428,34 @@ export default function AgentChat({ agent, onBack }) {
                 </button>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Right: chat */}
         <div className="flex-1 min-w-0 flex flex-col gap-3">
+          {/* Show/hide avatar toggle when hidden */}
+          {!showAvatar && (
+            <button
+              onClick={() => setShowAvatar(true)}
+              className="self-start text-xs text-gray-600 hover:text-gray-400 transition-colors"
+            >
+              Show avatar
+            </button>
+          )}
+          {showAvatar && (
+            <button
+              onClick={() => setShowAvatar(false)}
+              className="self-start text-xs text-gray-700 hover:text-gray-500 transition-colors"
+            >
+              Hide avatar
+            </button>
+          )}
+
           {/* Messages */}
           <div
             ref={messagesRef}
             className="flex-1 min-h-0 bg-gray-900 border border-gray-800 rounded-xl p-4 overflow-y-auto flex flex-col gap-2"
-            style={{ height: 'calc(100vh - 200px)' }}
+            style={{ height: 'calc(100vh - 220px)' }}
           >
             {messages.length === 0 && (
               <p className="text-gray-600 text-sm m-auto text-center">
@@ -346,17 +468,27 @@ export default function AgentChat({ agent, onBack }) {
                 className={`flex flex-col max-w-[80%] ${m.role === 'user' ? 'self-end items-end' : 'self-start items-start'}`}
               >
                 <div className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                  m.role === 'user'      ? 'bg-gray-800 text-gray-100' :
-                  m.role === 'error'     ? 'bg-red-950 border border-red-800 text-red-300' :
-                                           'bg-amber-950 border border-amber-900 text-amber-100'
+                  m.role === 'user'  ? 'bg-gray-800 text-gray-100' :
+                  m.role === 'error' ? 'bg-red-950 border border-red-800 text-red-300' :
+                                       'bg-amber-950 border border-amber-900 text-amber-100'
                 }`}>
                   {m.content}
                 </div>
-                {m.emotion && m.emotion !== 'NEUTRAL' && (
-                  <span className={`text-xs mt-0.5 px-1 capitalize ${EMOTION_COLOR[m.emotion] ?? 'text-gray-500'}`}>
-                    {m.emotion.toLowerCase()}
-                  </span>
+
+                {/* Emotion + action badges under message */}
+                {(m.emotion || (m.actions && m.actions.length > 0)) && (
+                  <div className="flex gap-1.5 flex-wrap mt-0.5 px-1">
+                    {m.emotion && m.emotion !== 'NEUTRAL' && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded border ${EMOTION_STYLES[m.emotion.toUpperCase()] ?? EMOTION_STYLES.NEUTRAL}`}>
+                        {m.emotion.toLowerCase()}
+                      </span>
+                    )}
+                    {m.actions?.map(a => (
+                      <span key={a} className="text-xs text-gray-600 font-mono">[{a}]</span>
+                    ))}
+                  </div>
                 )}
+
                 {m.stats && (
                   <span className="text-xs text-gray-700 mt-0.5 px-1 font-mono">
                     {m.stats.t_llm_ms}ms
@@ -365,10 +497,11 @@ export default function AgentChat({ agent, onBack }) {
                 )}
               </div>
             ))}
+
             {loading && (
               <div className="self-start flex items-center gap-2 text-amber-500 text-xs animate-pulse">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                {capitalize(emotions.processing || 'thinking')}…
+                Thinking…
               </div>
             )}
           </div>
@@ -405,6 +538,15 @@ export default function AgentChat({ agent, onBack }) {
           </form>
         </div>
       </div>
+    </div>
+  )
+}
+
+function StatRow({ label, value, mono }) {
+  return (
+    <div className="flex justify-between gap-2 text-gray-600">
+      <span>{label}</span>
+      <span className={`${mono ? 'font-mono text-gray-500' : ''} text-right truncate max-w-28`}>{value}</span>
     </div>
   )
 }

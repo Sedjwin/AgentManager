@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 
 const FACE_THEMES   = ['mechanical', 'organic', 'abstract', 'minimal']
 const EYE_STYLES    = ['angular', 'circular', 'compound', 'visor']
@@ -6,13 +7,15 @@ const MOUTH_STYLES  = ['thin', 'wide', 'segmented', 'aperture']
 const IDLE_ANIMS    = ['breathing', 'scanning', 'pulsing', 'flickering']
 
 const DNA_PARAMS = [
-  { key: 'energy',      label: 'Energy',      hint: 'Lethargic ↔ Frantic',     desc: 'Controls animation pace and vocal intensity' },
+  { key: 'energy',      label: 'Energy',      hint: 'Lethargic ↔ Frantic',     desc: 'Animation pace and vocal intensity' },
   { key: 'warmth',      label: 'Warmth',       hint: 'Clinical ↔ Warm',         desc: 'Shifts ambient glow toward warm amber tones' },
-  { key: 'confidence',  label: 'Confidence',   hint: 'Hesitant ↔ Assertive',    desc: 'Scales eye size; affects presence on-screen' },
+  { key: 'confidence',  label: 'Confidence',   hint: 'Hesitant ↔ Assertive',    desc: 'Scales eye size and on-screen presence' },
   { key: 'erraticness', label: 'Erraticness',  hint: 'Stable ↔ Unpredictable',  desc: 'Adds jitter and flicker to the idle animation' },
 ]
 
 export default function IdentityTab({ data, onChange }) {
+  const [styleOpen, setStyleOpen] = useState(false)
+
   const spec = safeSpec(data.avatar_spec)
   const dna  = safeDna(spec.dna)
 
@@ -61,8 +64,7 @@ export default function IdentityTab({ data, onChange }) {
                   type="color"
                   value={spec[key] || '#22d3ee'}
                   onChange={e => setSpec(key, e.target.value)}
-                  className="w-10 h-8 rounded cursor-pointer"
-                  style={{ width: 36, padding: 2 }}
+                  style={{ width: 36, height: 32, padding: 2, borderRadius: 4, cursor: 'pointer' }}
                 />
                 <input
                   value={spec[key] || ''}
@@ -76,37 +78,13 @@ export default function IdentityTab({ data, onChange }) {
         </div>
       </div>
 
-      {/* Avatar shape */}
-      <div>
-        <label className="block text-xs text-gray-500 uppercase tracking-wider mb-3">Avatar Shape</label>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Face theme">
-            <select value={spec.face_theme || 'mechanical'} onChange={e => setSpec('face_theme', e.target.value)}>
-              {FACE_THEMES.map(v => <option key={v}>{v}</option>)}
-            </select>
-          </Field>
-          <Field label="Eye style">
-            <select value={spec.eye_style || 'angular'} onChange={e => setSpec('eye_style', e.target.value)}>
-              {EYE_STYLES.map(v => <option key={v}>{v}</option>)}
-            </select>
-          </Field>
-          <Field label="Mouth style">
-            <select value={spec.mouth_style || 'segmented'} onChange={e => setSpec('mouth_style', e.target.value)}>
-              {MOUTH_STYLES.map(v => <option key={v}>{v}</option>)}
-            </select>
-          </Field>
-          <Field label="Idle animation">
-            <select value={spec.idle_animation || 'scanning'} onChange={e => setSpec('idle_animation', e.target.value)}>
-              {IDLE_ANIMS.map(v => <option key={v}>{v}</option>)}
-            </select>
-          </Field>
-        </div>
-      </div>
-
-      {/* Personality DNA */}
+      {/* Personality DNA — primary interface */}
       <div>
         <label className="block text-xs text-gray-500 uppercase tracking-wider mb-1">Personality DNA</label>
-        <p className="text-xs text-gray-600 mb-4">These four values are the agent's core traits — they influence animations, glow, and voice pace automatically.</p>
+        <p className="text-xs text-gray-600 mb-4">
+          These four values are the agent's soul — they drive animations, glow, and voice pace.
+          Use <span className="text-gray-400">AI</span> on the Personality tab to auto-generate all of these.
+        </p>
         <div className="space-y-4">
           {DNA_PARAMS.map(({ key, label, hint, desc }) => (
             <div key={key}>
@@ -129,6 +107,49 @@ export default function IdentityTab({ data, onChange }) {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Style details — collapsed by default, fine-tuning */}
+      <div className="border border-gray-800 rounded-lg overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setStyleOpen(o => !o)}
+          className="w-full flex items-center gap-2 px-4 py-3 text-xs text-gray-500 hover:text-gray-300 hover:bg-gray-800/40 transition-colors text-left"
+        >
+          <ChevronRight
+            size={13}
+            className={`transition-transform ${styleOpen ? 'rotate-90' : ''}`}
+          />
+          Style details — face shape, eyes, mouth, animation
+          <span className="ml-auto text-gray-700 text-xs">
+            {spec.face_theme || 'mechanical'} · {spec.eye_style || 'angular'} · {spec.idle_animation || 'scanning'}
+          </span>
+        </button>
+
+        {styleOpen && (
+          <div className="px-4 pb-4 pt-2 grid grid-cols-2 gap-4 border-t border-gray-800 bg-gray-900/30">
+            <Field label="Face theme">
+              <select value={spec.face_theme || 'mechanical'} onChange={e => setSpec('face_theme', e.target.value)}>
+                {FACE_THEMES.map(v => <option key={v}>{v}</option>)}
+              </select>
+            </Field>
+            <Field label="Eye style">
+              <select value={spec.eye_style || 'angular'} onChange={e => setSpec('eye_style', e.target.value)}>
+                {EYE_STYLES.map(v => <option key={v}>{v}</option>)}
+              </select>
+            </Field>
+            <Field label="Mouth style">
+              <select value={spec.mouth_style || 'segmented'} onChange={e => setSpec('mouth_style', e.target.value)}>
+                {MOUTH_STYLES.map(v => <option key={v}>{v}</option>)}
+              </select>
+            </Field>
+            <Field label="Idle animation">
+              <select value={spec.idle_animation || 'scanning'} onChange={e => setSpec('idle_animation', e.target.value)}>
+                {IDLE_ANIMS.map(v => <option key={v}>{v}</option>)}
+              </select>
+            </Field>
+          </div>
+        )}
       </div>
     </div>
   )
