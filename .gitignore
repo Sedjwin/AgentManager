@@ -1,13 +1,49 @@
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
-.env
+*.pyd
+*.so
+
+# Virtual environments
 .venv/
 venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.cert
+*.secret
+secrets.json
+secrets.yaml
+secrets.yml
+config.local.*
+
+# Database / agent data (contains tokens and conversation history)
 *.db
 *.sqlite
+*.sqlite3
 data/
+
+# Logs
+*.log
+logs/
+
+# Frontend build output
 node_modules/
 frontend/dist/
-*.log
+frontend/.vite/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
