@@ -136,13 +136,13 @@ export default function AgentModal({ agent, onClose, onSaved }) {
 
   async function handleSave() {
     if (!name.trim()) { setError('Name is required'); return }
-    if (!token.trim()) { setError('AI Gateway token is required'); return }
+    if (!isEdit && !token.trim()) { setError('AI Gateway token is required'); return }
     setSaving(true)
     setError(null)
     try {
       const body = {
         name: name.trim(),
-        ai_gateway_token: token.trim(),
+        ...(token.trim() ? { ai_gateway_token: token.trim() } : {}),
         system_prompt: systemPrompt,
         voice_enabled: voiceEnabled,
         voice_config: voiceEnabled ? { voice_id: voiceId } : null,
@@ -221,8 +221,8 @@ export default function AgentModal({ agent, onClose, onSaved }) {
             <Field label="Name *">
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="GlaDOS" />
             </Field>
-            <Field label="AI Gateway Token *" hint="The Bearer token assigned to this agent in AIGateway.">
-              <Input value={token} onChange={e => setToken(e.target.value)} placeholder="34e93070..." type="password" />
+            <Field label={isEdit ? 'AI Gateway Token' : 'AI Gateway Token *'} hint={isEdit ? 'Leave blank to keep the existing token.' : 'The Bearer token assigned to this agent in AIGateway.'}>
+              <Input value={token} onChange={e => setToken(e.target.value)} placeholder={isEdit ? '(unchanged)' : '34e93070...'} type="password" />
             </Field>
             <Field label="System Prompt" hint="The agent's core instructions. For Interaction agents, annotation instructions are appended automatically.">
               <Textarea value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} placeholder="You are..." rows={5} />
