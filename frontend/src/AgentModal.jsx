@@ -61,7 +61,7 @@ function Slider({ label, value, onChange, min = 0, max = 1, step = 0.01 }) {
 
 function Toggle({ label, checked, onChange }) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer">
+    <label className="flex items-center gap-3 cursor-pointer" onClick={() => onChange(!checked)}>
       <div className={`relative w-10 h-5 rounded-full transition-colors ${checked ? 'bg-amber-500' : 'bg-gray-700'}`}>
         <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-5' : ''}`} />
       </div>
