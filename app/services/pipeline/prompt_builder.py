@@ -4,32 +4,49 @@ from __future__ import annotations
 from typing import Any
 
 
+_TOOL_PREAMBLE = """
+---
+TOOL CALLING:
+You have access to tools. When you need to call a tool, emit a {tool:name} tag inline in your response at the point where the result should be inserted. You may optionally pass parameters using pipe-separated key=value pairs: {tool:name|key=value|key=value}.
+
+Important:
+- Only call tools you have been given instructions for below.
+- The gateway may deny tool requests based on policy. If a call is denied, acknowledge it gracefully.
+- Do not emit tool tags in your final response — only in your first pass."""
+
+
 def build_messages(
     agent_system_prompt: str,
     profile: dict[str, Any] | None,
     history: list[dict[str, str]],
     user_text: str,
+    tool_use_enabled: bool = False,
+    tool_skill_mds: list[str] | None = None,
 ) -> list[dict[str, str]]:
-    system = _build_system(agent_system_prompt, profile)
+    system = _build_system(agent_system_prompt, profile, tool_use_enabled, tool_skill_mds or [])
     messages = [{"role": "system", "content": system}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_text})
     return messages
 
 
-def _build_system(agent_system_prompt: str, profile: dict[str, Any] | None) -> str:
-    if profile is None:
-        # Functional agent — plain system prompt, optionally voice-aware
-        return agent_system_prompt
+def _build_system(
+    agent_system_prompt: str,
+    profile: dict[str, Any] | None,
+    tool_use_enabled: bool,
+    tool_skill_mds: list[str],
+) -> str:
+    base = agent_system_prompt
 
-    display_name = profile.get("display_name", "Assistant")
-    emotions = list(profile.get("emotions", {}).keys())
-    actions = list(profile.get("actions", {}).keys())
+    if profile is not None:
+        display_name = profile.get("display_name", "Assistant")
+        emotions = list(profile.get("emotions", {}).keys())
+        actions = list(profile.get("actions", {}).keys())
 
-    emotion_list = ", ".join(emotions) if emotions else "(none)"
-    action_list = ", ".join(actions) if actions else "(none)"
+        emotion_list = ", ".join(emotions) if emotions else "(none)"
+        action_list = ", ".join(actions) if actions else "(none)"
 
-    annotation_block = f"""
+        base += f"""
 ---
 RESPONSE FORMAT:
 You are {display_name}. You have a face and voice. When you respond, embed emotional and action cues inline in your text using curly brace tags.
@@ -49,4 +66,10 @@ Rules:
 - Write your spoken text naturally. The tags are invisible to the listener.
 - Your response will be spoken aloud via text-to-speech. Write naturally — no markdown, no bullet points unless asked."""
 
-    return agent_system_prompt + annotation_block
+    if tool_use_enabled and tool_skill_mds:
+        base += _TOOL_PREAMBLE
+        for md in tool_skill_mds:
+            if md.strip():
+                base += "\n\n" + md.strip()
+
+    return base

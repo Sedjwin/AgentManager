@@ -12,13 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import Agent
-from app.schemas import AgentCreate, AgentListItem, AgentOut, AgentUpdate
+from app.schemas import AgentCreate, AgentListItem, AgentOut, AgentToolConfig, AgentToolItem, AgentUpdate
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
 
 
 def _agent_to_out(agent: Agent) -> AgentOut:
+    enabled_tools_data = json.loads(agent.enabled_tools or "[]")
     return AgentOut(
         agent_id=agent.agent_id,
         name=agent.name,
@@ -29,6 +30,8 @@ def _agent_to_out(agent: Agent) -> AgentOut:
         has_profile=agent.profile is not None,
         um_user_id=agent.um_user_id,
         um_api_key=agent.um_api_key,
+        tool_use_enabled=agent.tool_use_enabled,
+        enabled_tools=[t["name"] for t in enabled_tools_data],
         created_at=agent.created_at,
         updated_at=agent.updated_at,
     )
@@ -43,6 +46,7 @@ def _agent_to_list_item(agent: Agent) -> AgentListItem:
         system_prompt=agent.system_prompt,
         profile=json.loads(agent.profile) if agent.profile else None,
         voice_config=json.loads(agent.voice_config) if agent.voice_config else None,
+        um_user_id=agent.um_user_id,
     )
 
 
@@ -159,3 +163,97 @@ async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
         await _deregister_from_usermanager(agent.um_user_id)
     await db.delete(agent)
     await db.commit()
+
+
+# ── Tool configuration ────────────────────────────────────────────────────────
+
+@router.get("/{agent_id}/tools", response_model=list[AgentToolItem])
+async def get_agent_tools(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """Return the list of tools granted to this agent (fetched from ToolGateway)."""
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if not agent.um_user_id or not agent.um_api_key:
+        return []
+
+    enabled_tools_data = json.loads(agent.enabled_tools or "[]")
+    enabled_names = {t["name"] for t in enabled_tools_data}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Fetch grants for this agent's principal
+            grants_r = await client.get(
+                f"{settings.toolgateway_url}/api/grants",
+                params={"principal_id": str(agent.um_user_id)},
+                headers={"Authorization": f"Bearer {agent.um_api_key}"},
+            )
+            if grants_r.status_code != 200:
+                return []
+            grants = grants_r.json()
+
+            # Fetch full tool details for each grant
+            items: list[AgentToolItem] = []
+            for grant in grants:
+                tool_r = await client.get(
+                    f"{settings.toolgateway_url}/api/tools/{grant['tool_id']}",
+                    headers={"Authorization": f"Bearer {agent.um_api_key}"},
+                )
+                if tool_r.status_code != 200:
+                    continue
+                t = tool_r.json()
+                items.append(AgentToolItem(
+                    tool_id=t["tool_id"],
+                    name=t["name"],
+                    description=t["description"],
+                    state=t["state"],
+                    enabled=t["enabled"],
+                    skill_md=t["skill_md"],
+                    grant_id=grant["id"],
+                    grant_enabled=grant["enabled"],
+                ))
+            return items
+    except Exception as exc:
+        logger.warning("Could not fetch tools from ToolGateway: %s", exc)
+        return []
+
+
+@router.put("/{agent_id}/tools")
+async def update_agent_tools(
+    agent_id: str,
+    body: AgentToolConfig,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update which tools are enabled for this agent and cache their SkillMD."""
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    agent.tool_use_enabled = body.tool_use_enabled
+
+    if not body.enabled_tools:
+        agent.enabled_tools = "[]"
+    else:
+        # Fetch SkillMD for each enabled tool from ToolGateway
+        tools_with_md = []
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                all_tools_r = await client.get(f"{settings.toolgateway_url}/api/tools")
+                if all_tools_r.status_code == 200:
+                    all_tools = {t["name"]: t for t in all_tools_r.json()}
+                    for name in body.enabled_tools:
+                        if name in all_tools:
+                            tools_with_md.append({
+                                "name": name,
+                                "skill_md": all_tools[name].get("skill_md", ""),
+                            })
+                        else:
+                            tools_with_md.append({"name": name, "skill_md": ""})
+        except Exception as exc:
+            logger.warning("Could not fetch tool SkillMDs from ToolGateway: %s", exc)
+            tools_with_md = [{"name": n, "skill_md": ""} for n in body.enabled_tools]
+
+        agent.enabled_tools = json.dumps(tools_with_md)
+
+    await db.commit()
+    await db.refresh(agent)
+    return {"tool_use_enabled": agent.tool_use_enabled, "enabled_tools": body.enabled_tools}

@@ -75,6 +75,7 @@ async def send_message(
     session, agent = await _load_session_and_agent(session_id, db)
     profile = json.loads(agent.profile) if agent.profile else None
     voice_config = json.loads(agent.voice_config) if agent.voice_config else None
+    tool_skill_mds = _get_tool_skill_mds(agent)
 
     try:
         return await process_text(
@@ -86,6 +87,8 @@ async def send_message(
             voice_config=voice_config,
             ai_gateway_token=agent.ai_gateway_token,
             um_api_key=agent.um_api_key,
+            tool_use_enabled=agent.tool_use_enabled,
+            tool_skill_mds=tool_skill_mds,
         )
     except InterruptedError:
         raise HTTPException(409, "Request interrupted")
@@ -100,6 +103,7 @@ async def send_audio(
     session, agent = await _load_session_and_agent(session_id, db)
     profile = json.loads(agent.profile) if agent.profile else None
     voice_config = json.loads(agent.voice_config) if agent.voice_config else None
+    tool_skill_mds = _get_tool_skill_mds(agent)
 
     audio_bytes = await audio.read()
     try:
@@ -112,6 +116,8 @@ async def send_audio(
             voice_config=voice_config,
             ai_gateway_token=agent.ai_gateway_token,
             um_api_key=agent.um_api_key,
+            tool_use_enabled=agent.tool_use_enabled,
+            tool_skill_mds=tool_skill_mds,
         )
     except InterruptedError:
         raise HTTPException(409, "Request interrupted")
@@ -144,10 +150,20 @@ async def stream_response_post(
     return await _do_stream(session_id, body.text, db)
 
 
+def _get_tool_skill_mds(agent) -> list[str]:
+    """Extract ordered list of skill_md strings from the agent's enabled_tools JSON."""
+    try:
+        tools_data = json.loads(agent.enabled_tools or "[]")
+        return [t["skill_md"] for t in tools_data if t.get("skill_md")]
+    except Exception:
+        return []
+
+
 async def _do_stream(session_id: str, text: str, db: AsyncSession) -> StreamingResponse:
     session, agent = await _load_session_and_agent(session_id, db)
     profile = json.loads(agent.profile) if agent.profile else None
     voice_config = json.loads(agent.voice_config) if agent.voice_config else None
+    tool_skill_mds = _get_tool_skill_mds(agent)
 
     async def event_generator() -> AsyncIterator[str]:
         async for chunk in process_text_streaming(
@@ -159,6 +175,8 @@ async def _do_stream(session_id: str, text: str, db: AsyncSession) -> StreamingR
             voice_config=voice_config,
             ai_gateway_token=agent.ai_gateway_token,
             um_api_key=agent.um_api_key,
+            tool_use_enabled=agent.tool_use_enabled,
+            tool_skill_mds=tool_skill_mds,
         ):
             yield f"data: {chunk.model_dump_json()}\n\n"
         yield "data: [DONE]\n\n"

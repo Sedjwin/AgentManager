@@ -28,6 +28,8 @@ async def process_text(
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
     um_api_key: str | None = None,
+    tool_use_enabled: bool = False,
+    tool_skill_mds: list[str] | None = None,
 ) -> AgentResponse:
     """Full pipeline for a text message. Returns a single assembled response."""
     session.clear_interrupt()
@@ -37,7 +39,10 @@ async def process_text(
     session.logger.log_user_text(turn, user_text)
 
     # Step 2: Build LLM messages
-    messages = build_messages(agent_system_prompt, profile, session.history, user_text)
+    messages = build_messages(
+        agent_system_prompt, profile, session.history, user_text,
+        tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
+    )
 
     # Step 2b: Call AIGateway
     raw_llm = await _call_llm(messages, ai_gateway_token)
@@ -110,6 +115,8 @@ async def process_audio(
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
     um_api_key: str | None = None,
+    tool_use_enabled: bool = False,
+    tool_skill_mds: list[str] | None = None,
 ) -> AgentResponse:
     """Full pipeline for audio input — runs STT first, then same as process_text."""
     session.clear_interrupt()
@@ -122,7 +129,10 @@ async def process_audio(
 
     # Build and run the rest of the pipeline directly (bypass process_text to avoid
     # double turn increment and double logging)
-    messages = build_messages(agent_system_prompt, profile, session.history, transcript)
+    messages = build_messages(
+        agent_system_prompt, profile, session.history, transcript,
+        tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
+    )
     raw_llm = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
@@ -189,6 +199,8 @@ async def process_text_streaming(
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
     um_api_key: str | None = None,
+    tool_use_enabled: bool = False,
+    tool_skill_mds: list[str] | None = None,
 ) -> AsyncIterator[AgentResponse]:
     """
     Streaming pipeline: splits LLM output at sentence boundaries,
@@ -199,7 +211,10 @@ async def process_text_streaming(
     turn = session.logger.next_turn()
     session.logger.log_user_text(turn, user_text)
 
-    messages = build_messages(agent_system_prompt, profile, session.history, user_text)
+    messages = build_messages(
+        agent_system_prompt, profile, session.history, user_text,
+        tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
+    )
     raw_llm = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:

@@ -36,6 +36,8 @@ class AgentOut(BaseModel):
     has_profile: bool
     um_user_id: int | None = None
     um_api_key: str | None = None
+    tool_use_enabled: bool = False
+    enabled_tools: list[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -55,8 +57,25 @@ class AgentListItem(BaseModel):
     system_prompt: str
     profile: dict[str, Any] | None = None
     voice_config: dict[str, Any] | None = None
+    um_user_id: int | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AgentToolItem(BaseModel):
+    tool_id: str
+    name: str
+    description: str
+    state: str
+    enabled: bool
+    skill_md: str
+    grant_id: int
+    grant_enabled: bool
+
+
+class AgentToolConfig(BaseModel):
+    tool_use_enabled: bool
+    enabled_tools: list[str]  # list of tool names
 
 
 # ── Session schemas ──────────────────────────────────────────────────────────
