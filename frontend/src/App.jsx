@@ -146,7 +146,6 @@ function AgentApp({ user, logout }) {
               agent={selected}
               onEdit={() => setModal(selected)}
               onDelete={() => handleDelete(selected)}
-              onRefresh={load}
             />
           ) : (
             <div className="h-full flex items-center justify-center text-gray-700 text-sm">

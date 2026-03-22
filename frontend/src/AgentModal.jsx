@@ -2,6 +2,19 @@ import { useState, useEffect } from 'react'
 import { X, Save, Loader } from 'lucide-react'
 import { createAgent, updateAgent } from './api.js'
 
+async function fetchAgentTools(agentId) {
+  const r = await fetch(`/agents/${agentId}/tools`)
+  return r.ok ? r.json() : []
+}
+
+async function saveAgentTools(agentId, toolUseEnabled, enabledTools) {
+  await fetch(`/agents/${agentId}/tools`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool_use_enabled: toolUseEnabled, enabled_tools: enabledTools }),
+  })
+}
+
 function Field({ label, children, hint }) {
   return (
     <div>
@@ -65,8 +78,6 @@ export default function AgentModal({ agent, onClose, onSaved }) {
   const [systemPrompt, setSystemPrompt] = useState(agent?.system_prompt ?? '')
   const [voiceEnabled, setVoiceEnabled] = useState(agent?.voice_enabled ?? false)
   const [voiceId, setVoiceId]         = useState(agent?.voice_config?.voice_id ?? 'glados')
-  const [baseSpeed, setBaseSpeed]     = useState(agent?.voice_config?.base_speed ?? 0.5)
-  const [basePitch, setBasePitch]     = useState(agent?.voice_config?.base_pitch ?? 0.5)
   const [voices, setVoices]           = useState(['glados'])
 
   useEffect(() => {
@@ -108,6 +119,21 @@ export default function AgentModal({ agent, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState(null)
 
+  // Tool use
+  const [toolUseEnabled, setToolUseEnabled] = useState(agent?.tool_use_enabled ?? false)
+  const [enabledTools, setEnabledTools]     = useState(new Set(agent?.enabled_tools ?? []))
+  const [grantedTools, setGrantedTools]     = useState([])
+  const [toolsLoading, setToolsLoading]     = useState(false)
+
+  useEffect(() => {
+    if (!isEdit) return
+    setToolsLoading(true)
+    fetchAgentTools(agent.agent_id).then(tools => {
+      setGrantedTools(tools)
+      setToolsLoading(false)
+    })
+  }, [isEdit, agent?.agent_id])
+
   async function handleSave() {
     if (!name.trim()) { setError('Name is required'); return }
     if (!token.trim()) { setError('AI Gateway token is required'); return }
@@ -119,11 +145,15 @@ export default function AgentModal({ agent, onClose, onSaved }) {
         ai_gateway_token: token.trim(),
         system_prompt: systemPrompt,
         voice_enabled: voiceEnabled,
-        voice_config: voiceEnabled ? { voice_id: voiceId, base_speed: baseSpeed, base_pitch: basePitch, base_tone: 'neutral' } : null,
+        voice_config: voiceEnabled ? { voice_id: voiceId } : null,
         profile: hasProfile ? buildProfile() : null,
       }
-      if (isEdit) await updateAgent(agent.agent_id, body)
-      else await createAgent(body)
+      if (isEdit) {
+        await updateAgent(agent.agent_id, body)
+        await saveAgentTools(agent.agent_id, toolUseEnabled, [...enabledTools])
+      } else {
+        await createAgent(body)
+      }
       onSaved()
     } catch (e) {
       setError(e.message)
@@ -205,14 +235,12 @@ export default function AgentModal({ agent, onClose, onSaved }) {
             <Toggle label="Enable voice (TTS/STT)" checked={voiceEnabled} onChange={setVoiceEnabled} />
             {voiceEnabled && (
               <div className="space-y-4 pl-4 border-l-2 border-gray-800">
-                <Field label="Voice">
+                <Field label="Voice" hint="Fine-tune speed and pitch in VoiceService admin panel.">
                   <select value={voiceId} onChange={e => setVoiceId(e.target.value)}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-amber-500">
                     {voices.map(v => <option key={v} value={v}>{v}</option>)}
                   </select>
                 </Field>
-                <Slider label="Base Speed" value={baseSpeed} onChange={setBaseSpeed} />
-                <Slider label="Base Pitch" value={basePitch} onChange={setBasePitch} />
               </div>
             )}
           </div>
@@ -287,6 +315,46 @@ export default function AgentModal({ agent, onClose, onSaved }) {
               </div>
             )}
           </div>
+          {/* Tool Use — edit only */}
+          {isEdit && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Tool Use</h3>
+              </div>
+              <Toggle label="Enable tool use" checked={toolUseEnabled} onChange={setToolUseEnabled} />
+              {toolUseEnabled && (
+                <div className="space-y-2 pl-4 border-l-2 border-gray-800">
+                  {toolsLoading && <p className="text-xs text-gray-600">Loading granted tools…</p>}
+                  {!toolsLoading && grantedTools.length === 0 && (
+                    <p className="text-xs text-gray-600 italic">No tools granted to this agent yet — grant tools in ToolGateway first.</p>
+                  )}
+                  {grantedTools.map(t => (
+                    <label key={t.tool_id} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${
+                      t.grant_enabled && t.enabled ? 'border-gray-700 bg-gray-800/50 hover:border-gray-600' : 'border-gray-800 opacity-50 cursor-not-allowed'
+                    }`}>
+                      <input
+                        type="checkbox"
+                        checked={enabledTools.has(t.name)}
+                        disabled={!t.grant_enabled || !t.enabled}
+                        onChange={e => {
+                          const next = new Set(enabledTools)
+                          e.target.checked ? next.add(t.name) : next.delete(t.name)
+                          setEnabledTools(next)
+                        }}
+                        className="mt-0.5 accent-amber-500"
+                      />
+                      <div>
+                        <div className="text-sm font-mono text-violet-300">{t.name}</div>
+                        {t.description && <div className="text-xs text-gray-500">{t.description}</div>}
+                        {!t.grant_enabled && <div className="text-xs text-gray-600">(grant disabled in ToolGateway)</div>}
+                        {!t.enabled && <div className="text-xs text-gray-600">(tool disabled in ToolGateway)</div>}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
