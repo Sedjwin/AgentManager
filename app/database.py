@@ -20,3 +20,18 @@ async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+async def migrate_db():
+    """Add columns introduced after initial schema creation (idempotent)."""
+    from sqlalchemy import text
+    stmts = [
+        "ALTER TABLE agents ADD COLUMN um_user_id INTEGER",
+        "ALTER TABLE agents ADD COLUMN um_api_key TEXT",
+    ]
+    async with engine.begin() as conn:
+        for stmt in stmts:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass  # column already exists

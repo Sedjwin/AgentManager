@@ -7,9 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, migrate_db
 from app.routers import agents, sessions
-from app.seed import seed_glados, seed_tars
+from app.seed import seed_glados, seed_tars, backfill_um_principals
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 
@@ -17,8 +17,10 @@ FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await migrate_db()
     await seed_glados()
     await seed_tars()
+    await backfill_um_principals()
     yield
 
 

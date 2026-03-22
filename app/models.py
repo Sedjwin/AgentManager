@@ -17,5 +17,7 @@ class Agent(Base):
     voice_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     voice_config: Mapped[str | None] = mapped_column(Text, nullable=True)   # JSON string or null
     profile: Mapped[str | None] = mapped_column(Text, nullable=True)        # JSON string or null
+    um_user_id: Mapped[int | None] = mapped_column(nullable=True)           # UserManager principal ID
+    um_api_key: Mapped[str | None] = mapped_column(String, nullable=True)  # UserManager API key
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

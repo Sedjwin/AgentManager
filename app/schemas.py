@@ -34,6 +34,8 @@ class AgentOut(BaseModel):
     voice_config: dict[str, Any] | None = None
     profile: dict[str, Any] | None = None
     has_profile: bool
+    um_user_id: int | None = None
+    um_api_key: str | None = None
     created_at: datetime
     updated_at: datetime
 

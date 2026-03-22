@@ -2,12 +2,38 @@
 from __future__ import annotations
 
 import json
+import logging
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+import httpx
 
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models import Agent
+from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
+
+
+async def _ensure_um_principal(agent: Agent, display_name: str, db) -> None:
+    """Register with UserManager if not already done."""
+    if agent.um_user_id:
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"{settings.usermanager_url}/internal/principals",
+                headers={"X-Service-Key": settings.usermanager_service_key},
+                json={"username": f"agent_{agent.agent_id}", "display_name": display_name},
+                timeout=5.0,
+            )
+            if r.status_code == 201:
+                data = r.json()
+                agent.um_user_id = data["user_id"]
+                agent.um_api_key = data["api_key"]
+                await db.commit()
+                logger.info("[AgentManager] Registered %s with UserManager (user_id=%d)", display_name, data["user_id"])
+    except Exception as exc:
+        logger.warning("[AgentManager] Could not register %s with UserManager: %s", display_name, exc)
 
 GLADOS_TOKEN = "34e93070d8a934d841322a0418936ab8fc9b7658f8c52142d7fd0648b639c1d5"
 
@@ -382,6 +408,7 @@ async def seed_glados() -> None:
         result = await db.execute(select(Agent).where(Agent.name == "GlaDOS"))
         existing = result.scalar_one_or_none()
         if existing:
+            await _ensure_um_principal(existing, "GlaDOS", db)
             return
 
         agent = Agent(
@@ -394,7 +421,18 @@ async def seed_glados() -> None:
         )
         db.add(agent)
         await db.commit()
+        await db.refresh(agent)
+        await _ensure_um_principal(agent, "GlaDOS", db)
         print("[AgentManager] Seeded GlaDOS agent.")
+
+
+async def backfill_um_principals() -> None:
+    """Register any existing agents that don't have a UserManager principal yet."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Agent).where(Agent.um_user_id == None))  # noqa: E711
+        agents = result.scalars().all()
+        for agent in agents:
+            await _ensure_um_principal(agent, agent.name, db)
 
 
 async def seed_tars() -> None:
@@ -402,6 +440,7 @@ async def seed_tars() -> None:
         result = await db.execute(select(Agent).where(Agent.name == "TARS"))
         existing = result.scalar_one_or_none()
         if existing:
+            await _ensure_um_principal(existing, "TARS", db)
             return
 
         agent = Agent(
@@ -414,4 +453,6 @@ async def seed_tars() -> None:
         )
         db.add(agent)
         await db.commit()
+        await db.refresh(agent)
+        await _ensure_um_principal(agent, "TARS", db)
         print("[AgentManager] Seeded TARS agent.")
