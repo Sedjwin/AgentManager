@@ -14,6 +14,7 @@ from app.schemas import AgentResponse, TimelineEvent
 from app.services.pipeline.prompt_builder import build_messages
 from app.services.pipeline.response_parser import parse_response
 from app.services.pipeline.timeline_assembler import assemble_timeline
+from app.services.pipeline.tool_executor import execute_tool_calls, format_tool_results_for_llm
 from app.services.pipeline.voice_processor import synthesize, transcribe
 from app.services.session_manager import Session
 
@@ -26,6 +27,7 @@ async def process_text(
     voice_enabled: bool,
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
+    um_api_key: str | None = None,
 ) -> AgentResponse:
     """Full pipeline for a text message. Returns a single assembled response."""
     session.clear_interrupt()
@@ -43,8 +45,14 @@ async def process_text(
     if session.interrupted:
         raise InterruptedError
 
+    # Step 2c: Execute any tool calls and re-prompt with results
+    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id)
+
+    if session.interrupted:
+        raise InterruptedError
+
     # Step 3: Parse annotations
-    clean_text, annotations = parse_response(raw_llm)
+    clean_text, annotations, _ = parse_response(raw_llm)
 
     # Step 4 & 5: TTS + Timeline (only if voice enabled)
     audio_b64 = None
@@ -101,6 +109,7 @@ async def process_audio(
     voice_enabled: bool,
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
+    um_api_key: str | None = None,
 ) -> AgentResponse:
     """Full pipeline for audio input — runs STT first, then same as process_text."""
     session.clear_interrupt()
@@ -119,7 +128,12 @@ async def process_audio(
     if session.interrupted:
         raise InterruptedError
 
-    clean_text, annotations = parse_response(raw_llm)
+    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id)
+
+    if session.interrupted:
+        raise InterruptedError
+
+    clean_text, annotations, _ = parse_response(raw_llm)
 
     audio_b64 = None
     duration_ms = None
@@ -174,6 +188,7 @@ async def process_text_streaming(
     voice_enabled: bool,
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
+    um_api_key: str | None = None,
 ) -> AsyncIterator[AgentResponse]:
     """
     Streaming pipeline: splits LLM output at sentence boundaries,
@@ -190,7 +205,12 @@ async def process_text_streaming(
     if session.interrupted:
         return
 
-    clean_text, annotations = parse_response(raw_llm)
+    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id)
+
+    if session.interrupted:
+        return
+
+    clean_text, annotations, _ = parse_response(raw_llm)
     sentences = _split_sentences(clean_text)
 
     char_offset = 0
@@ -269,6 +289,33 @@ async def _call_llm(messages: list[dict[str, str]], token: str) -> str:
         resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["message"]["content"]
+
+
+async def _resolve_tool_calls(
+    raw_llm: str,
+    messages: list[dict],
+    ai_gateway_token: str,
+    um_api_key: str | None,
+    session_id: str | None,
+) -> str:
+    """
+    If the LLM response contains {tool:name} tags and the agent has a UM API key,
+    execute the tools via ToolGateway and re-prompt the LLM with the results.
+    Returns the final LLM response (with no tool tags).
+    """
+    _, _, tool_calls = parse_response(raw_llm)
+    if not tool_calls or not um_api_key:
+        return raw_llm
+
+    results = await execute_tool_calls(tool_calls, um_api_key, session_id)
+    tool_msg = format_tool_results_for_llm(results)
+
+    # Re-prompt: append the first response and the tool results, get final answer
+    second_pass = messages + [
+        {"role": "assistant", "content": raw_llm},
+        {"role": "user", "content": tool_msg},
+    ]
+    return await _call_llm(second_pass, ai_gateway_token)
 
 
 def _split_sentences(text: str) -> list[str]:

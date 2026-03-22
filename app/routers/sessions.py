@@ -85,6 +85,7 @@ async def send_message(
             voice_enabled=agent.voice_enabled,
             voice_config=voice_config,
             ai_gateway_token=agent.ai_gateway_token,
+            um_api_key=agent.um_api_key,
         )
     except InterruptedError:
         raise HTTPException(409, "Request interrupted")
@@ -110,6 +111,7 @@ async def send_audio(
             voice_enabled=agent.voice_enabled,
             voice_config=voice_config,
             ai_gateway_token=agent.ai_gateway_token,
+            um_api_key=agent.um_api_key,
         )
     except InterruptedError:
         raise HTTPException(409, "Request interrupted")
@@ -156,6 +158,7 @@ async def _do_stream(session_id: str, text: str, db: AsyncSession) -> StreamingR
             voice_enabled=agent.voice_enabled,
             voice_config=voice_config,
             ai_gateway_token=agent.ai_gateway_token,
+            um_api_key=agent.um_api_key,
         ):
             yield f"data: {chunk.model_dump_json()}\n\n"
         yield "data: [DONE]\n\n"
