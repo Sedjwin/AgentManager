@@ -137,6 +137,7 @@ Sessions are in-memory and ephemeral (cleared on service restart).
 |--------|-------------------------------------|------|--------------------------------------------------|
 | POST   | `/agents/{agent_id}/session`        | None | Start session → returns `SessionOut`             |
 | DELETE | `/sessions/{session_id}`            | None | End session (204)                                |
+| POST   | `/sessions/{session_id}/history`    | None | Pre-load prior messages into session history (204) |
 | POST   | `/sessions/{session_id}/interrupt`  | None | Cancel in-flight request (204)                   |
 
 **Start session request (optional):**
@@ -157,6 +158,17 @@ Optional headers: `X-User-Id`, `X-Username` (for session logging).
 ```
 
 `type` is `"interaction"` if the agent has a profile, `"functional"` otherwise.
+
+**`POST /sessions/{id}/history`** — pre-populates the session's in-memory history without triggering a live response. Used by ChatPortal to replay stored conversation messages when resuming after a restart. Replaces any existing history.
+
+```json
+{
+  "messages": [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Good morning, test subject."}
+  ]
+}
+```
 
 ---
 
