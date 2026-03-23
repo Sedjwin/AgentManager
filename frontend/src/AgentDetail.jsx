@@ -46,9 +46,7 @@ export default function AgentDetail({ agent, onEdit, onDelete }) {
                 : <span className="flex items-center gap-1 text-xs text-gray-600"><MicOff className="w-3 h-3" /> No voice</span>
               }
               {agent.tool_use_enabled && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400">
-                  Tools: {enabledTools.length > 0 ? enabledTools.join(', ') : 'enabled (none selected)'}
-                </span>
+                <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400">Tools</span>
               )}
             </div>
           </div>
@@ -76,6 +74,22 @@ export default function AgentDetail({ agent, onEdit, onDelete }) {
       {agent.voice_enabled && vc && (
         <Section title="Voice Configuration">
           <Field label="Voice">{vc.voice_id || '—'}</Field>
+        </Section>
+      )}
+
+      {/* Tool use */}
+      {agent.tool_use_enabled && (
+        <Section title="Tool Use">
+          {enabledTools.length === 0
+            ? <span className="text-xs text-gray-600 italic">Enabled but no tools selected</span>
+            : <div className="flex flex-wrap gap-2">
+                {enabledTools.map(name => (
+                  <span key={name} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-violet-300 font-mono">
+                    {name}
+                  </span>
+                ))}
+              </div>
+          }
         </Section>
       )}
 

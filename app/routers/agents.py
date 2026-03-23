@@ -38,6 +38,7 @@ def _agent_to_out(agent: Agent) -> AgentOut:
 
 
 def _agent_to_list_item(agent: Agent) -> AgentListItem:
+    enabled_tools_data = json.loads(agent.enabled_tools or "[]")
     return AgentListItem(
         agent_id=agent.agent_id,
         name=agent.name,
@@ -47,6 +48,8 @@ def _agent_to_list_item(agent: Agent) -> AgentListItem:
         profile=json.loads(agent.profile) if agent.profile else None,
         voice_config=json.loads(agent.voice_config) if agent.voice_config else None,
         um_user_id=agent.um_user_id,
+        tool_use_enabled=agent.tool_use_enabled,
+        enabled_tools=[t["name"] for t in enabled_tools_data],
     )
 
 

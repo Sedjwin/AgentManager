@@ -23,19 +23,16 @@ async def transcribe(audio_bytes: bytes) -> str:
 async def synthesize(text: str, voice_config: dict[str, Any] | None) -> dict[str, Any]:
     """
     Send text to VoiceService TTS.
+    Speed and other synthesis params are controlled by per-voice settings stored
+    in VoiceService (tunable via the VoiceService admin UI). Agents supply only
+    the voice_id — no speed overrides.
     Returns the full response dict: audio (base64), visemes, duration_ms, etc.
     """
-    voice_id = "glados"  # default
-    speed = 1.0
-
+    voice_id = "glados"
     if voice_config:
         voice_id = voice_config.get("voice_id", voice_id)
-        # Map normalized base_speed (0–1) to TTS speed multiplier (0.5–2.0)
-        base_speed = voice_config.get("base_speed")
-        if base_speed is not None:
-            speed = 0.5 + base_speed * 1.5
 
-    payload: dict[str, Any] = {"text": text, "voice": voice_id, "speed": speed}
+    payload: dict[str, Any] = {"text": text, "voice": voice_id}
 
     async with httpx.AsyncClient(timeout=600.0) as client:
         resp = await client.post(

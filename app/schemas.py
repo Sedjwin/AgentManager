@@ -58,6 +58,8 @@ class AgentListItem(BaseModel):
     profile: dict[str, Any] | None = None
     voice_config: dict[str, Any] | None = None
     um_user_id: int | None = None
+    tool_use_enabled: bool = False
+    enabled_tools: list[str] = []
 
     model_config = {"from_attributes": True}
 

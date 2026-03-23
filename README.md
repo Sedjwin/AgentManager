@@ -1,6 +1,6 @@
 # AgentManager
 
-Agent orchestration service for the AI infrastructure stack. Manages agent definitions, runs session-based STT→LLM→TTS pipelines, and assembles emotion/action/viseme timelines for expressive voice interactions.
+Agent orchestration service for the AI infrastructure stack. Manages agent definitions, runs session-based STT→LLM→TTS pipelines, assembles emotion/action/viseme timelines for expressive voice interactions, and integrates with ToolGateway for agent tool use.
 
 **Ports:** `8003` (internal) / `13374` (external, HTTPS via Caddy)
 
@@ -11,8 +11,9 @@ Agent orchestration service for the AI infrastructure stack. Manages agent defin
 - Agent CRUD — functional (text-only) or interaction (voice + personality profile) agents
 - Session-based conversation model with in-memory history
 - Orchestrates STT (VoiceService) → LLM (AIGateway) → TTS (VoiceService) per turn
-- Parses `{emotion:name}` / `{action:name}` tags from LLM output
+- Parses `{emotion:name}` / `{action:name}` / `{tool:name}` tags from LLM output
 - Assembles `timeline[]` merging emotion events, action events, and visemes with millisecond timestamps
+- Tool use — per-agent tool grants fetched from ToolGateway; SkillMD cached on agent and injected into system prompt at inference
 - File-based session logging (audio in/out + conversation JSONL)
 - Seeded agents: **GlaDOS** and **TARS**
 
@@ -22,11 +23,14 @@ Agent orchestration service for the AI infrastructure stack. Manages agent defin
 
 Set via environment variables or `.env` file:
 
-| Variable          | Default                                        | Description                       |
-|-------------------|------------------------------------------------|-----------------------------------|
-| `AIGATEWAY_URL`   | `http://localhost:8001`                        | AIGateway base URL                |
-| `VOICESERVICE_URL`| `http://localhost:8002`                        | VoiceService base URL             |
-| `DATABASE_URL`    | `sqlite+aiosqlite:///./data/agentmanager.db`   | SQLite connection string          |
+| Variable              | Default                                        | Description                          |
+|-----------------------|------------------------------------------------|--------------------------------------|
+| `AIGATEWAY_URL`       | `http://localhost:8001`                        | AIGateway base URL                   |
+| `VOICESERVICE_URL`    | `http://localhost:8002`                        | VoiceService base URL                |
+| `DATABASE_URL`        | `sqlite+aiosqlite:///./data/agentmanager.db`   | SQLite connection string             |
+| `USERMANAGER_URL`     | `http://localhost:8005`                        | UserManager base URL                 |
+| `USERMANAGER_SERVICE_KEY` | `change-me-service-key`                  | Service key for internal UM calls    |
+| `TOOLGATEWAY_URL`     | `http://localhost:8006`                        | ToolGateway base URL                 |
 
 ---
 
@@ -45,6 +49,13 @@ Set via environment variables or `.env` file:
 - Timeline assembled from tag positions + TTS visemes
 - Session type returned: `"interaction"`
 
+### Tool Use (any agent type)
+- Toggle `tool_use_enabled` on any agent (functional or interaction)
+- Available tools come from grants in ToolGateway for the agent's principal
+- Enabling a tool caches its SkillMD (markdown instructions) on the agent record
+- At inference time, a tool preamble + each SkillMD is appended to the system prompt
+- LLM emits `{tool:name}` inline when it needs a tool; the pipeline calls ToolGateway `/api/execute`, injects the result, and asks the LLM for a final response
+
 ---
 
 ## API Reference
@@ -60,25 +71,29 @@ Set via environment variables or `.env` file:
 
 ### Agent Management
 
-| Method | Path                        | Auth | Description                     |
-|--------|-----------------------------|------|---------------------------------|
-| GET    | `/agents`                   | None | List all agents                 |
-| POST   | `/agents`                   | None | Create agent (201)              |
-| GET    | `/agents/{agent_id}`        | None | Get agent by ID                 |
-| PUT    | `/agents/{agent_id}`        | None | Update agent (all fields optional) |
-| PUT    | `/agents/{agent_id}/profile`| None | Replace agent profile only      |
-| DELETE | `/agents/{agent_id}`        | None | Delete agent (204)              |
+| Method | Path                          | Auth | Description                          |
+|--------|-------------------------------|------|--------------------------------------|
+| GET    | `/agents`                     | None | List all agents                      |
+| POST   | `/agents`                     | None | Create agent (201)                   |
+| GET    | `/agents/{agent_id}`          | None | Get agent by ID                      |
+| PUT    | `/agents/{agent_id}`          | None | Update agent (all fields optional)   |
+| PUT    | `/agents/{agent_id}/profile`  | None | Replace agent profile only           |
+| DELETE | `/agents/{agent_id}`          | None | Delete agent (204)                   |
+| GET    | `/agents/{agent_id}/tools`    | None | List tools granted to this agent (fetched from ToolGateway) |
+| PUT    | `/agents/{agent_id}/tools`    | None | Set tool_use_enabled + cache SkillMDs for selected tools |
 
 **Agent fields:**
 
-| Field             | Type   | Description                                                       |
-|-------------------|--------|-------------------------------------------------------------------|
-| `name`            | str    | Unique display name                                               |
-| `ai_gateway_token`| str    | Bearer token for AIGateway LLM calls                             |
-| `system_prompt`   | str    | Base LLM system message                                           |
-| `voice_enabled`   | bool   | Enable TTS synthesis (default false)                              |
-| `voice_config`    | dict   | `{"voice_id": "glados", "base_pitch": 0.55, "base_speed": 0.42}` |
-| `profile`         | dict   | Interaction agent profile (appearance, emotions, actions, idle)   |
+| Field               | Type   | Description                                                       |
+|---------------------|--------|-------------------------------------------------------------------|
+| `name`              | str    | Unique display name                                               |
+| `ai_gateway_token`  | str    | Bearer token for AIGateway LLM calls                             |
+| `system_prompt`     | str    | Base LLM system message                                           |
+| `voice_enabled`     | bool   | Enable TTS synthesis (default false)                              |
+| `voice_config`      | dict   | `{"voice_id": "glados"}` — speed/pitch controlled in VoiceService |
+| `profile`           | dict   | Interaction agent profile (appearance, emotions, actions, idle)   |
+| `tool_use_enabled`  | bool   | Whether tool calling is active for this agent                     |
+| `enabled_tools`     | list   | Names of currently enabled tools (read-only — set via PUT /tools) |
 
 **`AgentOut` response:**
 
@@ -88,13 +103,29 @@ Set via environment variables or `.env` file:
   "name": "GlaDOS",
   "system_prompt": "...",
   "voice_enabled": true,
-  "voice_config": {"voice_id": "glados", "base_pitch": 0.55, "base_speed": 0.42},
+  "voice_config": {"voice_id": "glados"},
   "profile": { ... },
   "has_profile": true,
+  "um_user_id": 42,
+  "um_api_key": "...",
+  "tool_use_enabled": true,
+  "enabled_tools": ["get-time"],
   "created_at": "2026-01-01T00:00:00",
   "updated_at": "2026-01-01T00:00:00"
 }
 ```
+
+Note: `ai_gateway_token` is never returned. On edit, omit the field to keep the existing token.
+
+**`PUT /agents/{id}/tools` request:**
+```json
+{
+  "tool_use_enabled": true,
+  "enabled_tools": ["get-time"]
+}
+```
+
+This fetches SkillMD for each named tool from ToolGateway and caches it on the agent. SkillMD is only refreshed when tools are re-saved via this endpoint.
 
 ---
 
@@ -174,18 +205,33 @@ Optional headers: `X-User-Id`, `X-Username` (for session logging).
 
 ## Annotation Tags
 
-LLM output uses **curly-brace** tags (stripped from `text`, merged into `timeline[]`):
+LLM output uses **curly-brace** tags (stripped from `text`, merged into `timeline[]` or processed as tool calls):
 
 ```
 {emotion:name}   — set agent emotion (e.g. {emotion:disdainful})
 {action:name}    — trigger one-time action (e.g. {action:slow_blink})
+{tool:name}      — call a tool (e.g. {tool:get-time}); result injected and LLM re-prompted
 ```
 
-The available emotion and action names are per-agent (defined in the profile). They are injected into the system prompt automatically so the LLM knows the vocabulary.
+Emotion and action names are per-agent (defined in the profile) and injected into the system prompt automatically. Tool names come from the agent's enabled tools list.
 
 **Timeline timestamp mapping:** `t_ms = (char_position / total_chars) * duration_ms`
 
 Visemes come directly from VoiceService with `offset_ms`.
+
+---
+
+## Tool Call Flow
+
+When `tool_use_enabled` is true, the system prompt is augmented with:
+1. A tool preamble explaining the `{tool:name}` syntax and gateway denial behaviour
+2. The SkillMD for each enabled tool (cached from ToolGateway at configuration time)
+
+At runtime, when the LLM emits `{tool:name}`:
+1. Pipeline detects the tag in the first-pass response
+2. Calls `POST /api/execute` on ToolGateway (using the agent's `um_api_key`)
+3. Injects the tool result into the conversation
+4. LLM produces the final user-facing response
 
 ---
 
@@ -195,13 +241,13 @@ Both are seeded idempotently on startup.
 
 ### GlaDOS — Aperture Science AI
 - **Token:** `34e93070d8a934d841322a0418936ab8fc9b7658f8c52142d7fd0648b639c1d5`
-- **Voice:** `glados` · pitch 0.55 · speed 0.42 (slow, deliberate)
+- **Voice:** `glados`
 - **Personality:** Highly intelligent, condescending, dry dark humour. Treats humans as test subjects.
 - **Emotions:** `disdainful`, `satisfied`, `curious`, `irritated`, `sinister_pleased`, `bored`, `mock_concern`
 - **Actions:** `slow_blink`, `eye_narrow`, `head_tilt`, `scan`, `emphasis`
 
 ### TARS — Interstellar Tactical AI
-- **Voice:** `atlas` · pitch 0.3 · speed 0.48
+- **Voice:** `atlas`
 - **Personality:** USMC tactical robot. Dry deadpan humour (75%). Honest (90%). Short, efficient sentences.
 - **Emotions:** `precise`, `humorous`, `loyal`, `concerned`, `calculating`, `determined`
 - **Actions:** `data_scan`, `acknowledgment`, `emphasis`, `standby`
@@ -225,17 +271,23 @@ audio_out/           — TTS output per chunk (turn_NNNN_chunk_NNN.wav)
 
 ### Agent
 
-| Column            | Type     | Notes                 |
-|-------------------|----------|-----------------------|
-| `agent_id`        | str PK   | UUID                  |
-| `name`            | str      | Unique                |
-| `ai_gateway_token`| str      | Bearer token for LLM  |
-| `system_prompt`   | str      | Base system message   |
-| `voice_enabled`   | bool     |                       |
-| `voice_config`    | str/JSON | Nullable              |
-| `profile`         | str/JSON | Nullable              |
-| `created_at`      | datetime |                       |
-| `updated_at`      | datetime | Auto-updated          |
+| Column              | Type     | Notes                                              |
+|---------------------|----------|----------------------------------------------------|
+| `agent_id`          | str PK   | UUID                                               |
+| `name`              | str      | Unique                                             |
+| `ai_gateway_token`  | str      | Bearer token for LLM (never returned in responses) |
+| `system_prompt`     | str      | Base system message                                |
+| `voice_enabled`     | bool     |                                                    |
+| `voice_config`      | str/JSON | Nullable; `{"voice_id": "glados"}`                 |
+| `profile`           | str/JSON | Nullable; full interaction profile                 |
+| `um_user_id`        | int      | Nullable; principal ID in UserManager              |
+| `um_api_key`        | str      | Nullable; API key for UserManager/ToolGateway auth |
+| `tool_use_enabled`  | bool     | Default false                                      |
+| `enabled_tools`     | str/JSON | Default `[]`; `[{"name": "...", "skill_md": "..."}]` |
+| `created_at`        | datetime |                                                    |
+| `updated_at`        | datetime | Auto-updated                                       |
+
+New columns (`um_user_id`, `um_api_key`, `tool_use_enabled`, `enabled_tools`) are added via `migrate_db()` on startup — safe to run against existing databases.
 
 ---
 
