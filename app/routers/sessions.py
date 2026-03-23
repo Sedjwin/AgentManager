@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Agent
 from app.schemas import (
-    AgentResponse, DeviceCapabilities, InterruptRequest,
+    AgentResponse, DeviceCapabilities, HistoryLoad, InterruptRequest,
     SessionOut, TextMessage,
 )
 from app.services.pipeline.orchestrator import (
@@ -52,6 +52,20 @@ async def start_session(
 @router.delete("/sessions/{session_id}", status_code=204)
 async def end_session(session_id: str):
     session_manager.delete(session_id)
+
+
+@router.post("/sessions/{session_id}/history", status_code=204)
+async def load_history(session_id: str, body: HistoryLoad):
+    """
+    Pre-populate an existing session's in-memory history.
+    Called by ChatPortal when resuming a stored conversation so the agent
+    has context from previous exchanges without those turns being live-streamed.
+    Replaces any existing history in the session.
+    """
+    session = session_manager.get(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    session.history = [{"role": m.role, "content": m.content} for m in body.messages]
 
 
 # ── Interaction ──────────────────────────────────────────────────────────────

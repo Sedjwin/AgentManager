@@ -122,3 +122,13 @@ class AgentResponse(BaseModel):
 
 class InterruptRequest(BaseModel):
     session_id: str
+
+
+class HistoryMessage(BaseModel):
+    role: str       # "user" or "assistant"
+    content: str
+
+
+class HistoryLoad(BaseModel):
+    """Body for POST /sessions/{id}/history — pre-populates in-memory session history."""
+    messages: list[HistoryMessage]
