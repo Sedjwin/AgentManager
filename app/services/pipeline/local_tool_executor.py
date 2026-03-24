@@ -56,7 +56,7 @@ Current session ID: {current_session_id}
 
 RULES:
 - When a user asks you to "remember", "note", "save", or "keep" something across sessions, you MUST call update-personal-context immediately in that same response. Do not just say you will remember — call the tool or it will not be saved.
-- When asked to recall something from a previous session: call list-sessions, then read-session on the sessions with the highest turn_count (those are real conversations). Skip sessions with turn_count=1 — those are system sessions, not real conversations. Read as many sessions as needed until you find what you're looking for.
+- When asked to recall something from a previous session: call list-sessions, then read-session on the sessions with the highest turn_count. Skip ONLY sessions where turn_count=1 (those are system sessions). Sessions with turn_count=null are old sessions that may contain real conversations — read them too. Read as many sessions as needed until you find what you're looking for.
 - Do NOT call read-session on your own current session ID listed above.\
 """
 
