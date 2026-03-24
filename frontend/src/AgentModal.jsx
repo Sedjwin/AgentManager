@@ -120,6 +120,9 @@ export default function AgentModal({ agent, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState(null)
 
+  // Memory tools
+  const [memoryToolsEnabled, setMemoryToolsEnabled] = useState(agent?.memory_tools_enabled ?? true)
+
   // Tool use
   const [toolUseEnabled, setToolUseEnabled] = useState(agent?.tool_use_enabled ?? false)
   const [enabledTools, setEnabledTools]     = useState(new Set(agent?.enabled_tools ?? []))
@@ -148,6 +151,7 @@ export default function AgentModal({ agent, onClose, onSaved }) {
         voice_enabled: voiceEnabled,
         voice_config: voiceEnabled ? { voice_id: voiceId } : null,
         profile: hasProfile ? buildProfile() : null,
+        memory_tools_enabled: memoryToolsEnabled,
       }
       if (isEdit) {
         await updateAgent(agent.agent_id, body)
@@ -325,6 +329,15 @@ export default function AgentModal({ agent, onClose, onSaved }) {
               </div>
             )}
           </div>
+          {/* Memory Tools */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Memory Tools</h3>
+            <Toggle label="Enable built-in memory tools" checked={memoryToolsEnabled} onChange={setMemoryToolsEnabled} />
+            <p className="text-xs text-gray-600">
+              Gives the agent access to <span className="font-mono text-gray-500">update-personal-context</span>, <span className="font-mono text-gray-500">read-history</span>, <span className="font-mono text-gray-500">ask-agent</span>, and related built-in tools. Disable for agents that should not self-modify memory or communicate with other agents.
+            </p>
+          </div>
+
           {/* Tool Use — edit only */}
           {isEdit && (
             <div className="space-y-4">
