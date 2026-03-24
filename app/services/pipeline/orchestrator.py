@@ -55,6 +55,7 @@ async def process_text(
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
+        current_session_id=session.session_id,
     )
 
     # Step 2b: Call AIGateway
@@ -154,6 +155,7 @@ async def process_audio(
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
+        current_session_id=session.session_id,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
@@ -247,6 +249,7 @@ async def process_text_streaming(
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
+        current_session_id=session.session_id,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 

@@ -27,11 +27,13 @@ def build_messages(
     personal_context: str | None = None,
     task_list: str | None = None,
     memory_tools_enabled: bool = True,
+    current_session_id: str | None = None,
 ) -> list[dict[str, str]]:
     system = _build_system(
         agent_system_prompt, profile, tool_use_enabled, tool_skill_mds or [],
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
+        current_session_id=current_session_id,
     )
     messages = [{"role": "system", "content": system}]
     messages.extend(history)
@@ -47,6 +49,7 @@ def _build_system(
     personal_context: str | None = None,
     task_list: str | None = None,
     memory_tools_enabled: bool = True,
+    current_session_id: str | None = None,
 ) -> str:
     base = agent_system_prompt
 
@@ -88,7 +91,10 @@ Rules:
 
     # Inject memory tools if enabled (on by default)
     if memory_tools_enabled:
-        base += "\n\n" + LOCAL_TOOL_SKILL_MD
+        skill_md = LOCAL_TOOL_SKILL_MD.replace(
+            "{current_session_id}", current_session_id or "(unknown)"
+        )
+        base += "\n\n" + skill_md
 
     # Inject gateway tools if configured
     if tool_use_enabled and tool_skill_mds:

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     usermanager_url: str = "http://localhost:8005"
     usermanager_service_key: str = "change-me-service-key"
     toolgateway_url: str = "http://localhost:8006"
+    toolgateway_service_key: str = ""  # UserManager admin API key used to call ToolGateway
     database_url: str = "sqlite+aiosqlite:///./data/agentmanager.db"
 
     model_config = {"env_file": ".env"}

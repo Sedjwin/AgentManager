@@ -5,7 +5,7 @@ import logging
 
 import httpx
 
-from app.config import settings
+from app.config import settings  # noqa: F401 — used in _check_tg_permission and _ask_agent
 from app.services.agent_memory import (
     append_history_event,
     list_sessions,
@@ -52,9 +52,12 @@ You have built-in tools for managing your persistent memory and communicating wi
 {tool:ask-agent|agent_id=<uuid>|message=<text>}
   Send a message to another agent and receive their response. The other agent decides what to share based on their own context and judgment. Use this to consult specialists or coordinate tasks across agents.
 
+Current session ID: {current_session_id}
+
 RULES:
 - When a user asks you to "remember", "note", "save", or "keep" something across sessions, you MUST call update-personal-context immediately in that same response. Do not just say you will remember — call the tool or it will not be saved.
-- When asked to recall something from a previous session, call read-personal-context and/or read-session before answering.\
+- When asked to recall something from a previous session: call list-sessions, then read-session on the sessions with the highest turn_count (those are real conversations). Skip sessions with turn_count=1 — those are system sessions, not real conversations. Read as many sessions as needed until you find what you're looking for.
+- Do NOT call read-session on your own current session ID listed above.\
 """
 
 
@@ -63,11 +66,54 @@ def is_local_tool(name: str) -> bool:
 
 
 async def execute_local_tool_async(call: ToolCall, agent_id: str, session_id: str | None = None) -> dict:
-    """Async version — required for ask-agent which makes HTTP calls."""
+    """Async version — required for ask-agent which makes HTTP calls.
+    Checks ToolGateway permission (enabled/disabled) before executing if service key is configured.
+    """
+    # Permission check via ToolGateway (logs the call + enforces system-wide enable/disable)
+    tg_denied = await _check_tg_permission(call, agent_id, session_id)
+    if tg_denied:
+        return tg_denied
+
     if call.name == "ask-agent":
         return await _ask_agent(call, agent_id, session_id)
     # All other local tools are sync — delegate
     return execute_local_tool(call, agent_id, session_id)
+
+
+async def _check_tg_permission(call: ToolCall, agent_id: str, session_id: str | None) -> dict | None:
+    """
+    Call ToolGateway /api/execute for permission check + audit logging.
+    For kind=local tools, TG returns {proceed: True} on success.
+    Returns None if allowed (or TG is not configured), a rejection dict if denied.
+    """
+    key = settings.toolgateway_service_key
+    if not key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(
+                f"{settings.toolgateway_url}/api/execute",
+                json={
+                    "tool_name": call.name,
+                    "payload": call.params,
+                    "session_id": session_id,
+                    "originating_user_id": agent_id,
+                },
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            if r.status_code == 200:
+                result = r.json()
+                if result.get("status") == "rejected":
+                    return {
+                        "tool": call.name,
+                        "status": "error",
+                        "reason": f"Tool denied by ToolGateway: {result.get('reason', 'disabled')}",
+                    }
+                return None  # allowed
+            # Non-200: TG unavailable or tool not registered yet — allow anyway
+            return None
+    except Exception:
+        return None  # TG unavailable — fail open (don't break agents)
 
 
 def execute_local_tool(call: ToolCall, agent_id: str, session_id: str | None = None) -> dict:
@@ -98,7 +144,8 @@ def execute_local_tool(call: ToolCall, agent_id: str, session_id: str | None = N
                 {
                     "session_id": s["session_id"],
                     "started_at": s["started_at"],
-                    "user_id": s.get("user_id"),
+                    "ended_at": s.get("ended_at"),
+                    "turn_count": s.get("turn_count"),
                     "username": s.get("username"),
                 }
                 for s in sessions

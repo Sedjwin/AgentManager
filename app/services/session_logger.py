@@ -106,6 +106,17 @@ class SessionLogger:
 
         self._append(entry)
 
+    def close(self, turn_count: int) -> None:
+        """Update session.json with ended_at and turn_count."""
+        meta_path = self.session_dir / "session.json"
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+        meta["ended_at"] = _now()
+        meta["turn_count"] = turn_count
+        meta_path.write_text(json.dumps(meta, indent=2))
+
     # ── Internal ─────────────────────────────────────────────────────────────
 
     def _append(self, obj: dict) -> None:

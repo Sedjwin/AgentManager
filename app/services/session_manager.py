@@ -69,6 +69,7 @@ class SessionManager:
         if session:
             from app.services.agent_memory import append_history_event
             turns = len(session.history) // 2
+            session.logger.close(turns)
             append_history_event(
                 session.agent_id, "session_end",
                 session_id=session_id, turns=turns,
