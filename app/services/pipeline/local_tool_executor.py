@@ -50,7 +50,11 @@ You have built-in tools for managing your persistent memory and communicating wi
   Re-reads your current PersonalContext.md (already injected at session start, but call this after updating it).
 
 {tool:ask-agent|agent_id=<uuid>|message=<text>}
-  Send a message to another agent and receive their response. The other agent decides what to share based on their own context and judgment. Use this to consult specialists or coordinate tasks across agents.\
+  Send a message to another agent and receive their response. The other agent decides what to share based on their own context and judgment. Use this to consult specialists or coordinate tasks across agents.
+
+RULES:
+- When a user asks you to "remember", "note", "save", or "keep" something across sessions, you MUST call update-personal-context immediately in that same response. Do not just say you will remember — call the tool or it will not be saved.
+- When asked to recall something from a previous session, call read-personal-context and/or read-session before answering.\
 """
 
 
