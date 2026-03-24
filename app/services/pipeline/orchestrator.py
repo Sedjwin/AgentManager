@@ -16,7 +16,7 @@ from app.services.agent_memory import (
     read_personal_context,
     read_task_list,
 )
-from app.services.pipeline.local_tool_executor import execute_local_tool, is_local_tool
+from app.services.pipeline.local_tool_executor import execute_local_tool_async, is_local_tool
 from app.services.pipeline.prompt_builder import build_messages
 from app.services.pipeline.response_parser import parse_response
 from app.services.pipeline.timeline_assembler import assemble_timeline
@@ -358,7 +358,7 @@ async def _resolve_tool_calls(
 
     # Execute local memory tools (no API key required)
     for call in local_calls:
-        result = execute_local_tool(call, agent_id or "", session_id)
+        result = await execute_local_tool_async(call, agent_id or "", session_id)
         results.append(result)
 
     # Execute gateway tools via ToolGateway

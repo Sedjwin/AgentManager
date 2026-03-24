@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import logging
 
+import httpx
+
+from app.config import settings
 from app.services.agent_memory import (
     append_history_event,
     list_sessions,
@@ -21,15 +24,14 @@ LOCAL_TOOL_NAMES: set[str] = {
     "read-history",
     "list-sessions",
     "read-session",
+    "ask-agent",
 }
 
 # Injected into every agent's system prompt regardless of ToolGateway tool configuration.
 LOCAL_TOOL_SKILL_MD = """\
 ---
 MEMORY TOOLS:
-You have built-in tools for managing your persistent memory. Use {tool:name|param=value} syntax (same as other tools).
-
-Available memory tools:
+You have built-in tools for managing your persistent memory and communicating with other agents. Use {tool:name|param=value} syntax.
 
 {tool:update-personal-context|content=<your updated memory text>}
   Replaces your PersonalContext.md with <content>. Call this when you want to remember something across sessions.
@@ -45,12 +47,23 @@ Available memory tools:
   Reads the full conversation log for a specific past session.
 
 {tool:read-personal-context}
-  Re-reads your current PersonalContext.md (already injected at session start, but call this after updating it).\
+  Re-reads your current PersonalContext.md (already injected at session start, but call this after updating it).
+
+{tool:ask-agent|agent_id=<uuid>|message=<text>}
+  Send a message to another agent and receive their response. The other agent decides what to share based on their own context and judgment. Use this to consult specialists or coordinate tasks across agents.\
 """
 
 
 def is_local_tool(name: str) -> bool:
     return name in LOCAL_TOOL_NAMES
+
+
+async def execute_local_tool_async(call: ToolCall, agent_id: str, session_id: str | None = None) -> dict:
+    """Async version — required for ask-agent which makes HTTP calls."""
+    if call.name == "ask-agent":
+        return await _ask_agent(call, agent_id, session_id)
+    # All other local tools are sync — delegate
+    return execute_local_tool(call, agent_id, session_id)
 
 
 def execute_local_tool(call: ToolCall, agent_id: str, session_id: str | None = None) -> dict:
@@ -94,8 +107,71 @@ def execute_local_tool(call: ToolCall, agent_id: str, session_id: str | None = N
             events = read_session_conversation(agent_id, sid)
             return {"tool": call.name, "status": "ok", "data": {"events": events, "count": len(events)}}
 
+        elif call.name == "ask-agent":
+            # ask-agent is async — callers should use execute_local_tool_async instead
+            return {"tool": call.name, "status": "error", "reason": "ask-agent requires async context"}
+
     except Exception as exc:
         logger.warning("Local tool %s error: %s", call.name, exc)
         return {"tool": call.name, "status": "error", "reason": str(exc)}
 
     return {"tool": call.name, "status": "error", "reason": f"Unknown local tool: {call.name}"}
+
+
+async def _ask_agent(call: ToolCall, caller_agent_id: str, session_id: str | None) -> dict:
+    """
+    Send a message to another agent via a system session.
+    The target agent's full pipeline runs: PersonalContext injected, all tools available.
+    The target agent decides what to share based on their own context and judgment.
+    """
+    target_agent_id = call.params.get("agent_id", "")
+    message = call.params.get("message", "")
+
+    if not target_agent_id:
+        return {"tool": call.name, "status": "error", "reason": "agent_id parameter is required"}
+    if not message:
+        return {"tool": call.name, "status": "error", "reason": "message parameter is required"}
+    if target_agent_id == caller_agent_id:
+        return {"tool": call.name, "status": "error", "reason": "An agent cannot ask itself"}
+
+    base = settings.agentmanager_url if hasattr(settings, "agentmanager_url") else "http://localhost:8003"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Start a cross-agent system session
+            r = await client.post(
+                f"{base}/agents/{target_agent_id}/session",
+                json={},
+                headers={
+                    "X-Username": f"agent:{caller_agent_id}",
+                    "X-User-Id": f"agent:{caller_agent_id}",
+                },
+            )
+            r.raise_for_status()
+            target_session_id = r.json()["session_id"]
+
+            try:
+                r2 = await client.post(
+                    f"{base}/sessions/{target_session_id}/message",
+                    json={"text": message},
+                )
+                r2.raise_for_status()
+                response_text = r2.json().get("text", "")
+                logger.info("ask-agent: %s → %s: %d chars response", caller_agent_id, target_agent_id, len(response_text))
+                if session_id:
+                    append_history_event(
+                        caller_agent_id, "ask_agent",
+                        session_id=session_id,
+                        target_agent_id=target_agent_id,
+                        status="ok",
+                    )
+                return {"tool": call.name, "status": "ok", "data": {"response": response_text, "agent_id": target_agent_id}}
+            finally:
+                await client.delete(f"{base}/sessions/{target_session_id}")
+
+    except httpx.HTTPStatusError as exc:
+        logger.warning("ask-agent to %s failed: %s", target_agent_id, exc)
+        return {"tool": call.name, "status": "error", "reason": f"Agent returned {exc.response.status_code}"}
+    except Exception as exc:
+        logger.warning("ask-agent error: %s", exc)
+        return {"tool": call.name, "status": "error", "reason": str(exc)}
