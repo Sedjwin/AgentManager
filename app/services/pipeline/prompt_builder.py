@@ -14,7 +14,8 @@ You have access to tools. When you need to call a tool, emit a {tool:name} tag i
 Important:
 - Only call tools you have been given instructions for below.
 - The gateway may deny tool requests based on policy. If a call is denied, acknowledge it gracefully.
-- Do not emit tool tags in your final response — only in your first pass."""
+- You may call tools across multiple rounds. After each round you will receive the results and can call more tools if needed.
+- Give your final response (with no tool tags) only once you have all the information you need."""
 
 
 def build_messages(

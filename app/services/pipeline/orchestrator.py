@@ -5,9 +5,12 @@ MessagePipeline — orchestrates the full Steps 1-6 from the spec:
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.schemas import AgentResponse, TimelineEvent
@@ -352,6 +355,9 @@ async def _call_llm(messages: list[dict[str, str]], token: str) -> tuple[str, st
         return content, reasoning
 
 
+_MAX_TOOL_ROUNDS = 5
+
+
 async def _resolve_tool_calls(
     raw_llm: str,
     messages: list[dict],
@@ -362,58 +368,62 @@ async def _resolve_tool_calls(
     memory_tools_enabled: bool = True,
 ) -> str:
     """
-    Execute any {tool:name} tags in the LLM response, then re-prompt with results.
-    Local memory tools are executed directly; gateway tools route through ToolGateway.
+    Agentic tool loop: execute any {tool:name} tags in the LLM response, re-prompt
+    with results, and repeat until the response contains no tool tags or _MAX_TOOL_ROUNDS
+    is reached. Local memory tools execute directly; gateway tools route through ToolGateway.
     Returns the final LLM response (with no tool tags).
     """
-    _, _, tool_calls = parse_response(raw_llm)
-    if not tool_calls:
-        return raw_llm
+    current = raw_llm
+    conversation = list(messages)
 
-    local_calls = [c for c in tool_calls if is_local_tool(c.name)] if memory_tools_enabled else []
-    gateway_calls = [c for c in tool_calls if not is_local_tool(c.name)]
+    for round_num in range(_MAX_TOOL_ROUNDS):
+        _, _, tool_calls = parse_response(current)
+        if not tool_calls:
+            return current  # clean response — done
 
-    results = []
+        local_calls = [c for c in tool_calls if is_local_tool(c.name)] if memory_tools_enabled else []
+        gateway_calls = [c for c in tool_calls if not is_local_tool(c.name)]
 
-    # Execute local memory tools (no API key required)
-    for call in local_calls:
-        result = await execute_local_tool_async(call, agent_id or "", session_id)
-        results.append(result)
+        results = []
 
-    # Execute gateway tools via ToolGateway
-    if gateway_calls:
-        if um_api_key:
-            gateway_results = await execute_tool_calls(gateway_calls, um_api_key, session_id)
-            # Write history events for gateway tool calls
-            if agent_id:
-                for r in gateway_results:
-                    append_history_event(
-                        agent_id, "tool_call",
-                        session_id=session_id,
-                        tool=r.get("tool", "unknown"),
-                        status=r.get("status", "unknown"),
-                    )
-            results.extend(gateway_results)
-        else:
-            for call in gateway_calls:
-                results.append({
-                    "tool": call.name,
-                    "status": "error",
-                    "reason": "No ToolGateway API key configured for this agent",
-                })
+        for call in local_calls:
+            result = await execute_local_tool_async(call, agent_id or "", session_id)
+            results.append(result)
 
-    if not results:
-        return raw_llm
+        if gateway_calls:
+            if um_api_key:
+                gateway_results = await execute_tool_calls(gateway_calls, um_api_key, session_id)
+                if agent_id:
+                    for r in gateway_results:
+                        append_history_event(
+                            agent_id, "tool_call",
+                            session_id=session_id,
+                            tool=r.get("tool", "unknown"),
+                            status=r.get("status", "unknown"),
+                        )
+                results.extend(gateway_results)
+            else:
+                for call in gateway_calls:
+                    results.append({
+                        "tool": call.name,
+                        "status": "error",
+                        "reason": "No ToolGateway API key configured for this agent",
+                    })
 
-    tool_msg = format_tool_results_for_llm(results)
+        if not results:
+            return current
 
-    # Re-prompt: append the first response and the tool results, get final answer
-    second_pass = messages + [
-        {"role": "assistant", "content": raw_llm},
-        {"role": "user", "content": tool_msg},
-    ]
-    content, _ = await _call_llm(second_pass, ai_gateway_token)
-    return content
+        tool_msg = format_tool_results_for_llm(results)
+        logger.debug("Tool round %d/%d: executed %d tool(s)", round_num + 1, _MAX_TOOL_ROUNDS, len(results))
+
+        conversation = conversation + [
+            {"role": "assistant", "content": current},
+            {"role": "user", "content": tool_msg},
+        ]
+        current, _ = await _call_llm(conversation, ai_gateway_token)
+
+    logger.warning("Tool resolution reached max rounds (%d) — returning last response", _MAX_TOOL_ROUNDS)
+    return current
 
 
 def _split_sentences(text: str) -> list[str]:

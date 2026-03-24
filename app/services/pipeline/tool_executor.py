@@ -62,7 +62,7 @@ def format_tool_results_for_llm(results: list[dict]) -> str:
     """
     Format tool results as a system message for the LLM's second pass.
     """
-    lines = ["[Tool results — use these to complete your response]"]
+    lines = ["[Tool results — review these and call more tools if needed, or give your final response if you have all the information you need]"]
     for r in results:
         tool = r.get("tool", "unknown")
         status = r.get("status", "unknown")
