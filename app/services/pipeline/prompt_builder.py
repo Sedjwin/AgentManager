@@ -55,8 +55,8 @@ Your available emotions (use ONLY these): {emotion_list}
 Your available actions (use ONLY these): {action_list}
 
 Syntax:
-  {{emotion:name}} — shift to this emotional state. Stays active until changed.
-  {{action:name}}  — trigger a one-time expression/gesture at this point.
+  {{name}} — use the exact name from the lists above, wrapped in curly braces.
+  Emotions stay active until changed. Actions are one-time triggers.
 
 Rules:
 - Start every response with an emotion tag.

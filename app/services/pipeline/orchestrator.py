@@ -57,7 +57,7 @@ async def process_text(
         raise InterruptedError
 
     # Step 3: Parse annotations
-    clean_text, annotations, _ = parse_response(raw_llm)
+    clean_text, annotations, _ = parse_response(raw_llm, profile)
 
     # Step 4 & 5: TTS + Timeline (only if voice enabled)
     audio_b64 = None
@@ -144,7 +144,7 @@ async def process_audio(
     if session.interrupted:
         raise InterruptedError
 
-    clean_text, annotations, _ = parse_response(raw_llm)
+    clean_text, annotations, _ = parse_response(raw_llm, profile)
 
     audio_b64 = None
     duration_ms = None
@@ -227,7 +227,7 @@ async def process_text_streaming(
     if session.interrupted:
         return
 
-    clean_text, annotations, _ = parse_response(raw_llm)
+    clean_text, annotations, _ = parse_response(raw_llm, profile)
     sentences = _split_sentences(clean_text)
 
     char_offset = 0

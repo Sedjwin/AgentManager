@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 # Matches {emotion:name}, {action:name} — tolerant of extra whitespace
 _TAG_RE = re.compile(r"\{\s*(emotion|action)\s*:\s*([a-zA-Z0-9_]+)\s*\}")
+
+# Matches any {word} or {word_word} — used for bare-name pass when profile present
+_BARE_TAG_RE = re.compile(r"\{\s*([a-zA-Z0-9_]+)\s*\}")
 
 # Matches {tool:name} or {tool:name|key=value|key=value}
 _TOOL_RE = re.compile(r"\{\s*tool\s*:\s*([a-zA-Z0-9_-]+)([^}]*)?\s*\}")
@@ -35,9 +39,16 @@ def _parse_tool_params(raw: str) -> dict:
     return params
 
 
-def parse_response(raw: str) -> tuple[str, list[Annotation], list[ToolCall]]:
+def parse_response(
+    raw: str,
+    profile: dict[str, Any] | None = None,
+) -> tuple[str, list[Annotation], list[ToolCall]]:
     """
     Strip {emotion:x}, {action:x}, and {tool:name} tags from raw LLM output.
+
+    When an interaction agent profile is provided, also recognises bare {name}
+    tags where the name is in the agent's emotion or action vocabulary — this
+    handles the common case where the model omits the type prefix.
 
     Returns:
         clean_text  — text with all tags removed (safe to send to TTS)
@@ -56,19 +67,50 @@ def parse_response(raw: str) -> tuple[str, list[Annotation], list[ToolCall]]:
 
     after_tools = _TOOL_RE.sub(_extract_tool, raw)
 
-    # Second pass: extract emotion/action tags with char positions
+    # Build profile vocabulary lookups (only for interaction agents)
+    emotion_names: set[str] = set()
+    action_names: set[str] = set()
+    if profile:
+        emotion_names = set(profile.get("emotions", {}).keys())
+        action_names = set(profile.get("actions", {}).keys())
+
+    # Choose tag pattern: prefer prefixed {emotion:x}/{action:x}; also accept
+    # bare {name} when it matches a known profile vocabulary term.
     annotations: list[Annotation] = []
     clean_parts: list[str] = []
     cursor = 0
 
-    for match in _TAG_RE.finditer(after_tools):
-        preceding = after_tools[cursor:match.start()]
+    # Collect all tag matches — prefixed and (if profile present) bare
+    matches: list[tuple[int, int, str, str]] = []  # (start, end, type, value)
+
+    for m in _TAG_RE.finditer(after_tools):
+        matches.append((m.start(), m.end(), m.group(1), m.group(2)))
+
+    if emotion_names or action_names:
+        for m in _BARE_TAG_RE.finditer(after_tools):
+            name = m.group(1)
+            if name in emotion_names:
+                matches.append((m.start(), m.end(), "emotion", name))
+            elif name in action_names:
+                matches.append((m.start(), m.end(), "action", name))
+
+    # Sort by position and deduplicate overlapping spans (prefixed wins)
+    matches.sort(key=lambda x: x[0])
+    deduped: list[tuple[int, int, str, str]] = []
+    last_end = 0
+    for start, end, typ, val in matches:
+        if start >= last_end:
+            deduped.append((start, end, typ, val))
+            last_end = end
+
+    for start, end, typ, val in deduped:
+        preceding = after_tools[cursor:start]
         clean_parts.append(preceding)
-        cursor = match.end()
+        cursor = end
         annotations.append(Annotation(
             char=sum(len(p) for p in clean_parts),
-            type=match.group(1),
-            value=match.group(2),
+            type=typ,
+            value=val,
         ))
 
     clean_parts.append(after_tools[cursor:])
