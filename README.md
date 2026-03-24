@@ -196,6 +196,7 @@ Optional headers: `X-User-Id`, `X-Username` (for session logging).
 {
   "session_id": "uuid",
   "text": "I am functioning optimally, test subject.",
+  "reasoning": "The user greeted me. I should respond in character...",
   "transcript": "Hello there.",
   "audio": "<base64 WAV>",
   "duration_ms": 2400,
@@ -211,7 +212,7 @@ Optional headers: `X-User-Id`, `X-Username` (for session logging).
 }
 ```
 
-`transcript` is present only when input was audio. `audio` is null for functional agents or when `voice_enabled` is false. `timeline` `t` values are milliseconds from audio start.
+`transcript` is present only when input was audio. `audio` is null for functional agents or when `voice_enabled` is false. `timeline` `t` values are milliseconds from audio start. `reasoning` is the model's chain-of-thought from thinking models (e.g. DeepSeek R1, Claude extended thinking) — `null` for standard models. In streaming mode it is attached to the first chunk only.
 
 ---
 

@@ -110,6 +110,7 @@ class TimelineEvent(BaseModel):
 class AgentResponse(BaseModel):
     session_id: str
     text: str                               # clean text (tags stripped)
+    reasoning: str | None = None            # chain-of-thought from thinking models
     transcript: str | None = None           # if input was audio
     audio: str | None = None               # base64 WAV
     duration_ms: int | None = None

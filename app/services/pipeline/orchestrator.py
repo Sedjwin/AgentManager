@@ -45,7 +45,7 @@ async def process_text(
     )
 
     # Step 2b: Call AIGateway
-    raw_llm = await _call_llm(messages, ai_gateway_token)
+    raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
         raise InterruptedError
@@ -97,6 +97,7 @@ async def process_text(
     return AgentResponse(
         session_id=session.session_id,
         text=clean_text,
+        reasoning=reasoning,
         audio=audio_b64,
         duration_ms=duration_ms,
         sample_rate=sample_rate,
@@ -133,7 +134,7 @@ async def process_audio(
         agent_system_prompt, profile, session.history, transcript,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
     )
-    raw_llm = await _call_llm(messages, ai_gateway_token)
+    raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
         raise InterruptedError
@@ -180,6 +181,7 @@ async def process_audio(
     return AgentResponse(
         session_id=session.session_id,
         text=clean_text,
+        reasoning=reasoning,
         transcript=transcript,
         audio=audio_b64,
         duration_ms=duration_ms,
@@ -215,7 +217,7 @@ async def process_text_streaming(
         agent_system_prompt, profile, session.history, user_text,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
     )
-    raw_llm = await _call_llm(messages, ai_gateway_token)
+    raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
         return
@@ -279,6 +281,8 @@ async def process_text_streaming(
         yield AgentResponse(
             session_id=session.session_id,
             text=sentence,
+            # Attach reasoning only to the first chunk so the client receives it once
+            reasoning=reasoning if i == 0 else None,
             audio=audio_b64,
             duration_ms=duration_ms,
             sample_rate=sample_rate,
@@ -293,7 +297,8 @@ async def process_text_streaming(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _call_llm(messages: list[dict[str, str]], token: str) -> str:
+async def _call_llm(messages: list[dict[str, str]], token: str) -> tuple[str, str | None]:
+    """Call AIGateway. Returns (content, reasoning) — reasoning may be None."""
     payload = {"messages": messages, "stream": False}
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
@@ -303,7 +308,11 @@ async def _call_llm(messages: list[dict[str, str]], token: str) -> str:
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        msg = data["choices"][0]["message"]
+        content = msg.get("content") or ""
+        # OpenRouter returns reasoning in "reasoning" (some models use "reasoning_content")
+        reasoning = msg.get("reasoning") or msg.get("reasoning_content") or None
+        return content, reasoning
 
 
 async def _resolve_tool_calls(
@@ -330,7 +339,8 @@ async def _resolve_tool_calls(
         {"role": "assistant", "content": raw_llm},
         {"role": "user", "content": tool_msg},
     ]
-    return await _call_llm(second_pass, ai_gateway_token)
+    content, _ = await _call_llm(second_pass, ai_gateway_token)
+    return content
 
 
 def _split_sentences(text: str) -> list[str]:
