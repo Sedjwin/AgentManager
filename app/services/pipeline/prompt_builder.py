@@ -26,10 +26,12 @@ def build_messages(
     tool_skill_mds: list[str] | None = None,
     personal_context: str | None = None,
     task_list: str | None = None,
+    memory_tools_enabled: bool = True,
 ) -> list[dict[str, str]]:
     system = _build_system(
         agent_system_prompt, profile, tool_use_enabled, tool_skill_mds or [],
         personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
     )
     messages = [{"role": "system", "content": system}]
     messages.extend(history)
@@ -44,6 +46,7 @@ def _build_system(
     tool_skill_mds: list[str],
     personal_context: str | None = None,
     task_list: str | None = None,
+    memory_tools_enabled: bool = True,
 ) -> str:
     base = agent_system_prompt
 
@@ -83,8 +86,9 @@ Rules:
 - Write your spoken text naturally. The tags are invisible to the listener.
 - Your response will be spoken aloud via text-to-speech. Write naturally — no markdown, no bullet points unless asked."""
 
-    # Always inject memory tools (available to every agent)
-    base += "\n\n" + LOCAL_TOOL_SKILL_MD
+    # Inject memory tools if enabled (on by default)
+    if memory_tools_enabled:
+        base += "\n\n" + LOCAL_TOOL_SKILL_MD
 
     # Inject gateway tools if configured
     if tool_use_enabled and tool_skill_mds:

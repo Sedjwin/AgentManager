@@ -24,6 +24,7 @@ class AgentUpdate(BaseModel):
     voice_enabled: bool | None = None
     voice_config: dict[str, Any] | None = None
     profile: dict[str, Any] | None = None
+    memory_tools_enabled: bool | None = None
 
 
 class AgentOut(BaseModel):
@@ -38,6 +39,7 @@ class AgentOut(BaseModel):
     um_api_key: str | None = None
     tool_use_enabled: bool = False
     enabled_tools: list[str] = []
+    memory_tools_enabled: bool = True
     created_at: datetime
     updated_at: datetime
 
@@ -60,6 +62,7 @@ class AgentListItem(BaseModel):
     um_user_id: int | None = None
     tool_use_enabled: bool = False
     enabled_tools: list[str] = []
+    memory_tools_enabled: bool = True
 
     model_config = {"from_attributes": True}
 

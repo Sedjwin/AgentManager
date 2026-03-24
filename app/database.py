@@ -28,6 +28,7 @@ async def migrate_db():
     stmts = [
         "ALTER TABLE agents ADD COLUMN um_user_id INTEGER",
         "ALTER TABLE agents ADD COLUMN um_api_key TEXT",
+        "ALTER TABLE agents ADD COLUMN memory_tools_enabled INTEGER NOT NULL DEFAULT 1",
     ]
     async with engine.begin() as conn:
         for stmt in stmts:

@@ -21,6 +21,7 @@ class Agent(Base):
     um_api_key: Mapped[str | None] = mapped_column(String, nullable=True)  # UserManager API key
     tool_use_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     enabled_tools: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    memory_tools_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # JSON: [{"name": "get-time", "skill_md": "..."}]
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

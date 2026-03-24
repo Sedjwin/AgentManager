@@ -104,6 +104,7 @@ async def send_message(
             um_api_key=agent.um_api_key,
             tool_use_enabled=agent.tool_use_enabled,
             tool_skill_mds=tool_skill_mds,
+            memory_tools_enabled=bool(agent.memory_tools_enabled),
         )
     except InterruptedError:
         raise HTTPException(409, "Request interrupted")
@@ -134,6 +135,7 @@ async def send_audio(
             um_api_key=agent.um_api_key,
             tool_use_enabled=agent.tool_use_enabled,
             tool_skill_mds=tool_skill_mds,
+            memory_tools_enabled=bool(agent.memory_tools_enabled),
         )
     except InterruptedError:
         raise HTTPException(409, "Request interrupted")
@@ -194,6 +196,7 @@ async def _do_stream(session_id: str, text: str, db: AsyncSession) -> StreamingR
             um_api_key=agent.um_api_key,
             tool_use_enabled=agent.tool_use_enabled,
             tool_skill_mds=tool_skill_mds,
+            memory_tools_enabled=bool(agent.memory_tools_enabled),
         ):
             yield f"data: {chunk.model_dump_json()}\n\n"
         yield "data: [DONE]\n\n"

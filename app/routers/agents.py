@@ -33,6 +33,7 @@ def _agent_to_out(agent: Agent) -> AgentOut:
         um_api_key=agent.um_api_key,
         tool_use_enabled=agent.tool_use_enabled,
         enabled_tools=[t["name"] for t in enabled_tools_data],
+        memory_tools_enabled=bool(agent.memory_tools_enabled),
         created_at=agent.created_at,
         updated_at=agent.updated_at,
     )
@@ -51,6 +52,7 @@ def _agent_to_list_item(agent: Agent) -> AgentListItem:
         um_user_id=agent.um_user_id,
         tool_use_enabled=agent.tool_use_enabled,
         enabled_tools=[t["name"] for t in enabled_tools_data],
+        memory_tools_enabled=bool(agent.memory_tools_enabled),
     )
 
 
@@ -145,6 +147,8 @@ async def update_agent(agent_id: str, body: AgentUpdate, db: AsyncSession = Depe
         agent.voice_config = json.dumps(body.voice_config)
     if body.profile is not None:
         agent.profile = json.dumps(body.profile)
+    if body.memory_tools_enabled is not None:
+        agent.memory_tools_enabled = body.memory_tools_enabled
     await db.commit()
     await db.refresh(agent)
     return _agent_to_out(agent)

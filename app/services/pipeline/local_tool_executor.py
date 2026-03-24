@@ -40,8 +40,8 @@ You have built-in tools for managing your persistent memory and communicating wi
 {tool:read-history|limit=<N>}
   Returns your last N history events (session starts/ends, tool calls). Default limit: 30.
 
-{tool:list-sessions}
-  Lists your past sessions with metadata (session_id, username, started_at).
+{tool:list-sessions|limit=<N>}
+  Lists your past N sessions with metadata (session_id, username, started_at). Default limit: 20.
 
 {tool:read-session|session_id=<id>}
   Reads the full conversation log for a specific past session.
@@ -88,7 +88,8 @@ def execute_local_tool(call: ToolCall, agent_id: str, session_id: str | None = N
             return {"tool": call.name, "status": "ok", "data": {"events": events, "count": len(events)}}
 
         elif call.name == "list-sessions":
-            sessions = list_sessions(agent_id)
+            limit = int(call.params.get("limit", 20))
+            sessions = list_sessions(agent_id)[:limit]
             summary = [
                 {
                     "session_id": s["session_id"],
@@ -98,7 +99,7 @@ def execute_local_tool(call: ToolCall, agent_id: str, session_id: str | None = N
                 }
                 for s in sessions
             ]
-            return {"tool": call.name, "status": "ok", "data": {"sessions": summary}}
+            return {"tool": call.name, "status": "ok", "data": {"sessions": summary, "shown": len(summary)}}
 
         elif call.name == "read-session":
             sid = call.params.get("session_id", "")

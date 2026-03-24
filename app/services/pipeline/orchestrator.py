@@ -37,6 +37,7 @@ async def process_text(
     um_api_key: str | None = None,
     tool_use_enabled: bool = False,
     tool_skill_mds: list[str] | None = None,
+    memory_tools_enabled: bool = True,
 ) -> AgentResponse:
     """Full pipeline for a text message. Returns a single assembled response."""
     session.clear_interrupt()
@@ -53,6 +54,7 @@ async def process_text(
         agent_system_prompt, profile, session.history, user_text,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
         personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
     )
 
     # Step 2b: Call AIGateway
@@ -62,7 +64,10 @@ async def process_text(
         raise InterruptedError
 
     # Step 2c: Execute any tool calls and re-prompt with results
-    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id)
+    raw_llm = await _resolve_tool_calls(
+        raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id,
+        memory_tools_enabled=memory_tools_enabled,
+    )
 
     if session.interrupted:
         raise InterruptedError
@@ -130,6 +135,7 @@ async def process_audio(
     um_api_key: str | None = None,
     tool_use_enabled: bool = False,
     tool_skill_mds: list[str] | None = None,
+    memory_tools_enabled: bool = True,
 ) -> AgentResponse:
     """Full pipeline for audio input — runs STT first, then same as process_text."""
     session.clear_interrupt()
@@ -147,13 +153,17 @@ async def process_audio(
         agent_system_prompt, profile, session.history, transcript,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
         personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
         raise InterruptedError
 
-    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id)
+    raw_llm = await _resolve_tool_calls(
+        raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id,
+        memory_tools_enabled=memory_tools_enabled,
+    )
 
     if session.interrupted:
         raise InterruptedError
@@ -218,6 +228,7 @@ async def process_text_streaming(
     um_api_key: str | None = None,
     tool_use_enabled: bool = False,
     tool_skill_mds: list[str] | None = None,
+    memory_tools_enabled: bool = True,
 ) -> AsyncIterator[AgentResponse]:
     """
     Streaming pipeline: splits LLM output at sentence boundaries,
@@ -235,13 +246,17 @@ async def process_text_streaming(
         agent_system_prompt, profile, session.history, user_text,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
         personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
         return
 
-    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id)
+    raw_llm = await _resolve_tool_calls(
+        raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id,
+        memory_tools_enabled=memory_tools_enabled,
+    )
 
     if session.interrupted:
         return
@@ -319,7 +334,7 @@ async def process_text_streaming(
 async def _call_llm(messages: list[dict[str, str]], token: str) -> tuple[str, str | None]:
     """Call AIGateway. Returns (content, reasoning) — reasoning may be None."""
     payload = {"messages": messages, "stream": False}
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
             f"{settings.aigateway_url}/v1/chat/completions",
             json=payload,
@@ -341,6 +356,7 @@ async def _resolve_tool_calls(
     um_api_key: str | None,
     session_id: str | None,
     agent_id: str | None = None,
+    memory_tools_enabled: bool = True,
 ) -> str:
     """
     Execute any {tool:name} tags in the LLM response, then re-prompt with results.
@@ -351,7 +367,7 @@ async def _resolve_tool_calls(
     if not tool_calls:
         return raw_llm
 
-    local_calls = [c for c in tool_calls if is_local_tool(c.name)]
+    local_calls = [c for c in tool_calls if is_local_tool(c.name)] if memory_tools_enabled else []
     gateway_calls = [c for c in tool_calls if not is_local_tool(c.name)]
 
     results = []
