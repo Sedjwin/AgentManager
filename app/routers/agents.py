@@ -13,6 +13,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Agent
 from app.schemas import AgentCreate, AgentListItem, AgentOut, AgentToolConfig, AgentToolItem, AgentUpdate
+from app.services.agent_memory import ensure_agent_data_dir
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
@@ -112,6 +113,9 @@ async def create_agent(body: AgentCreate, db: AsyncSession = Depends(get_db)):
         agent.um_api_key = um_api_key
         await db.commit()
         await db.refresh(agent)
+
+    # Scaffold agent data directory (PersonalContext.md, history.jsonl)
+    ensure_agent_data_dir(agent.agent_id)
 
     return _agent_to_out(agent)
 

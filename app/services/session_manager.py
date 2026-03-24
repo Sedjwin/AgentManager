@@ -45,6 +45,9 @@ class SessionManager:
         user_id: str | None = None,
         username: str | None = None,
     ) -> Session:
+        from app.services.agent_memory import append_history_event, ensure_agent_data_dir
+        ensure_agent_data_dir(agent_id)
+
         sid = str(uuid.uuid4())
         logger = SessionLogger(agent_id, sid)
         logger.init(user_id, username, device_capabilities)
@@ -55,13 +58,21 @@ class SessionManager:
             logger=logger,
         )
         self._sessions[sid] = session
+        append_history_event(agent_id, "session_start", session_id=sid, user_id=user_id, username=username)
         return session
 
     def get(self, session_id: str) -> Session | None:
         return self._sessions.get(session_id)
 
     def delete(self, session_id: str) -> None:
-        self._sessions.pop(session_id, None)
+        session = self._sessions.pop(session_id, None)
+        if session:
+            from app.services.agent_memory import append_history_event
+            turns = len(session.history) // 2
+            append_history_event(
+                session.agent_id, "session_end",
+                session_id=session_id, turns=turns,
+            )
 
 
 session_manager = SessionManager()

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.pipeline.local_tool_executor import LOCAL_TOOL_SKILL_MD
+
 
 _TOOL_PREAMBLE = """
 ---
@@ -22,8 +24,13 @@ def build_messages(
     user_text: str,
     tool_use_enabled: bool = False,
     tool_skill_mds: list[str] | None = None,
+    personal_context: str | None = None,
+    task_list: str | None = None,
 ) -> list[dict[str, str]]:
-    system = _build_system(agent_system_prompt, profile, tool_use_enabled, tool_skill_mds or [])
+    system = _build_system(
+        agent_system_prompt, profile, tool_use_enabled, tool_skill_mds or [],
+        personal_context=personal_context, task_list=task_list,
+    )
     messages = [{"role": "system", "content": system}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_text})
@@ -35,8 +42,18 @@ def _build_system(
     profile: dict[str, Any] | None,
     tool_use_enabled: bool,
     tool_skill_mds: list[str],
+    personal_context: str | None = None,
+    task_list: str | None = None,
 ) -> str:
     base = agent_system_prompt
+
+    # Inject agent's persistent memory
+    if personal_context:
+        base += f"\n\n---\nPERSONAL CONTEXT (your persistent memory across sessions):\n{personal_context}"
+
+    # Inject HeartbeatService task list if present
+    if task_list:
+        base += f"\n\n---\nTASK LIST (scheduled tasks from HeartbeatService):\n{task_list}"
 
     if profile is not None:
         display_name = profile.get("display_name", "Assistant")
@@ -66,6 +83,10 @@ Rules:
 - Write your spoken text naturally. The tags are invisible to the listener.
 - Your response will be spoken aloud via text-to-speech. Write naturally — no markdown, no bullet points unless asked."""
 
+    # Always inject memory tools (available to every agent)
+    base += "\n\n" + LOCAL_TOOL_SKILL_MD
+
+    # Inject gateway tools if configured
     if tool_use_enabled and tool_skill_mds:
         base += _TOOL_PREAMBLE
         for md in tool_skill_mds:

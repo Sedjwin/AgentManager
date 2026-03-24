@@ -10,8 +10,20 @@ from app.config import settings
 from app.database import init_db, migrate_db
 from app.routers import agents, sessions
 from app.seed import seed_glados, seed_tars, backfill_um_principals
+from app.services.agent_memory import ensure_agent_data_dir
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+
+
+async def _backfill_agent_data_dirs() -> None:
+    """Ensure every existing agent has its data directory scaffolded."""
+    from sqlalchemy import select
+    from app.database import AsyncSessionLocal
+    from app.models import Agent
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Agent.agent_id))
+        for (agent_id,) in result.all():
+            ensure_agent_data_dir(agent_id)
 
 
 @asynccontextmanager
@@ -21,6 +33,7 @@ async def lifespan(app: FastAPI):
     await seed_glados()
     await seed_tars()
     await backfill_um_principals()
+    await _backfill_agent_data_dirs()
     yield
 
 

@@ -11,6 +11,12 @@ import httpx
 
 from app.config import settings
 from app.schemas import AgentResponse, TimelineEvent
+from app.services.agent_memory import (
+    append_history_event,
+    read_personal_context,
+    read_task_list,
+)
+from app.services.pipeline.local_tool_executor import execute_local_tool, is_local_tool
 from app.services.pipeline.prompt_builder import build_messages
 from app.services.pipeline.response_parser import parse_response
 from app.services.pipeline.timeline_assembler import assemble_timeline
@@ -27,6 +33,7 @@ async def process_text(
     voice_enabled: bool,
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
+    agent_id: str | None = None,
     um_api_key: str | None = None,
     tool_use_enabled: bool = False,
     tool_skill_mds: list[str] | None = None,
@@ -38,10 +45,14 @@ async def process_text(
     turn = session.logger.next_turn()
     session.logger.log_user_text(turn, user_text)
 
-    # Step 2: Build LLM messages
+    # Step 2: Build LLM messages (inject PersonalContext + TaskList)
+    _agent_id = agent_id or session.agent_id
+    personal_context = read_personal_context(_agent_id)
+    task_list = read_task_list(_agent_id)
     messages = build_messages(
         agent_system_prompt, profile, session.history, user_text,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
+        personal_context=personal_context, task_list=task_list,
     )
 
     # Step 2b: Call AIGateway
@@ -51,7 +62,7 @@ async def process_text(
         raise InterruptedError
 
     # Step 2c: Execute any tool calls and re-prompt with results
-    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id)
+    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id)
 
     if session.interrupted:
         raise InterruptedError
@@ -115,6 +126,7 @@ async def process_audio(
     voice_enabled: bool,
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
+    agent_id: str | None = None,
     um_api_key: str | None = None,
     tool_use_enabled: bool = False,
     tool_skill_mds: list[str] | None = None,
@@ -128,18 +140,20 @@ async def process_audio(
     turn = session.logger.next_turn()
     session.logger.log_user_audio(turn, transcript, audio_bytes)
 
-    # Build and run the rest of the pipeline directly (bypass process_text to avoid
-    # double turn increment and double logging)
+    _agent_id = agent_id or session.agent_id
+    personal_context = read_personal_context(_agent_id)
+    task_list = read_task_list(_agent_id)
     messages = build_messages(
         agent_system_prompt, profile, session.history, transcript,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
+        personal_context=personal_context, task_list=task_list,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
         raise InterruptedError
 
-    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id)
+    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id)
 
     if session.interrupted:
         raise InterruptedError
@@ -200,6 +214,7 @@ async def process_text_streaming(
     voice_enabled: bool,
     voice_config: dict[str, Any] | None,
     ai_gateway_token: str,
+    agent_id: str | None = None,
     um_api_key: str | None = None,
     tool_use_enabled: bool = False,
     tool_skill_mds: list[str] | None = None,
@@ -213,16 +228,20 @@ async def process_text_streaming(
     turn = session.logger.next_turn()
     session.logger.log_user_text(turn, user_text)
 
+    _agent_id = agent_id or session.agent_id
+    personal_context = read_personal_context(_agent_id)
+    task_list = read_task_list(_agent_id)
     messages = build_messages(
         agent_system_prompt, profile, session.history, user_text,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
+        personal_context=personal_context, task_list=task_list,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
         return
 
-    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id)
+    raw_llm = await _resolve_tool_calls(raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id)
 
     if session.interrupted:
         return
@@ -321,17 +340,52 @@ async def _resolve_tool_calls(
     ai_gateway_token: str,
     um_api_key: str | None,
     session_id: str | None,
+    agent_id: str | None = None,
 ) -> str:
     """
-    If the LLM response contains {tool:name} tags and the agent has a UM API key,
-    execute the tools via ToolGateway and re-prompt the LLM with the results.
+    Execute any {tool:name} tags in the LLM response, then re-prompt with results.
+    Local memory tools are executed directly; gateway tools route through ToolGateway.
     Returns the final LLM response (with no tool tags).
     """
     _, _, tool_calls = parse_response(raw_llm)
-    if not tool_calls or not um_api_key:
+    if not tool_calls:
         return raw_llm
 
-    results = await execute_tool_calls(tool_calls, um_api_key, session_id)
+    local_calls = [c for c in tool_calls if is_local_tool(c.name)]
+    gateway_calls = [c for c in tool_calls if not is_local_tool(c.name)]
+
+    results = []
+
+    # Execute local memory tools (no API key required)
+    for call in local_calls:
+        result = execute_local_tool(call, agent_id or "", session_id)
+        results.append(result)
+
+    # Execute gateway tools via ToolGateway
+    if gateway_calls:
+        if um_api_key:
+            gateway_results = await execute_tool_calls(gateway_calls, um_api_key, session_id)
+            # Write history events for gateway tool calls
+            if agent_id:
+                for r in gateway_results:
+                    append_history_event(
+                        agent_id, "tool_call",
+                        session_id=session_id,
+                        tool=r.get("tool", "unknown"),
+                        status=r.get("status", "unknown"),
+                    )
+            results.extend(gateway_results)
+        else:
+            for call in gateway_calls:
+                results.append({
+                    "tool": call.name,
+                    "status": "error",
+                    "reason": "No ToolGateway API key configured for this agent",
+                })
+
+    if not results:
+        return raw_llm
+
     tool_msg = format_tool_results_for_llm(results)
 
     # Re-prompt: append the first response and the tool results, get final answer
