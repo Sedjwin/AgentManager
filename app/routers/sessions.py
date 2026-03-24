@@ -15,7 +15,7 @@ from app.schemas import (
     SessionOut, TextMessage,
 )
 from app.services.pipeline.orchestrator import (
-    process_audio, process_text, process_text_streaming,
+    process_audio, process_text, process_text_debug, process_text_streaming,
 )
 from app.services.session_manager import session_manager
 
@@ -166,6 +166,48 @@ async def stream_response_post(
 ):
     """SSE endpoint (POST) — streams response chunks."""
     return await _do_stream(session_id, body.text, db)
+
+
+@router.post("/sessions/{session_id}/debug")
+async def debug_message(
+    session_id: str,
+    body: TextMessage,
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE endpoint — streams real pipeline events as they execute.
+    Each event is a JSON object: {event, ts, ...fields}.
+    Ends with 'data: [DONE]'.
+    """
+    session, agent = await _load_session_and_agent(session_id, db)
+    profile      = json.loads(agent.profile)      if agent.profile      else None
+    voice_config = json.loads(agent.voice_config) if agent.voice_config else None
+    tool_skill_mds = _get_tool_skill_mds(agent)
+
+    async def event_gen() -> AsyncIterator[str]:
+        try:
+            async for event in process_text_debug(
+                session=session,
+                user_text=body.text,
+                agent_system_prompt=agent.system_prompt,
+                profile=profile,
+                voice_enabled=agent.voice_enabled,
+                voice_config=voice_config,
+                ai_gateway_token=agent.ai_gateway_token,
+                agent_id=agent.agent_id,
+                um_api_key=agent.um_api_key,
+                tool_use_enabled=agent.tool_use_enabled,
+                tool_skill_mds=tool_skill_mds,
+                memory_tools_enabled=bool(agent.memory_tools_enabled),
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except InterruptedError:
+            yield f"data: {json.dumps({'event': 'interrupted', 'ts': -1})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'event': 'error', 'ts': -1, 'message': str(exc)})}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
 def _get_tool_skill_mds(agent) -> list[str]:

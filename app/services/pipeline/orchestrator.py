@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, AsyncIterator
 
 import httpx
@@ -437,3 +438,202 @@ def _split_sentences(text: str) -> list[str]:
         else:
             sentences.append(part)
     return [s for s in sentences if s.strip()]
+
+
+async def process_text_debug(
+    session: Session,
+    user_text: str,
+    agent_system_prompt: str,
+    profile: dict[str, Any] | None,
+    voice_enabled: bool,
+    voice_config: dict[str, Any] | None,
+    ai_gateway_token: str,
+    agent_id: str | None = None,
+    um_api_key: str | None = None,
+    tool_use_enabled: bool = False,
+    tool_skill_mds: list[str] | None = None,
+    memory_tools_enabled: bool = True,
+) -> AsyncIterator[dict]:
+    """
+    Async generator that runs the full pipeline and yields a debug event dict
+    at every meaningful step (LLM call, tool call, tool result, TTS, done).
+    Timestamps are milliseconds from the start of this call.
+    Audio is excluded from events to keep payloads small — use the normal
+    /message endpoint if audio playback is needed.
+    """
+    t0 = time.monotonic()
+    def ms() -> int:
+        return int((time.monotonic() - t0) * 1000)
+
+    session.clear_interrupt()
+    turn = session.logger.next_turn()
+    session.logger.log_user_text(turn, user_text)
+
+    yield {"event": "start", "ts": 0, "user_text": user_text}
+
+    _agent_id = agent_id or session.agent_id
+    personal_context = read_personal_context(_agent_id)
+    task_list = read_task_list(_agent_id)
+    messages = build_messages(
+        agent_system_prompt, profile, session.history, user_text,
+        tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
+        personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
+        current_session_id=session.session_id,
+    )
+
+    # ── Round 0: initial LLM call ────────────────────────────────────────────
+    yield {"event": "llm_start", "ts": ms(), "round": 0, "message_count": len(messages)}
+    try:
+        t_llm = time.monotonic()
+        raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
+        llm_elapsed = int((time.monotonic() - t_llm) * 1000)
+    except Exception as exc:
+        yield {"event": "error", "ts": ms(), "message": str(exc)}
+        return
+
+    _, _, tc = parse_response(raw_llm)
+    yield {
+        "event": "llm_done", "ts": ms(), "round": 0,
+        "elapsed_ms": llm_elapsed, "raw_llm": raw_llm,
+        "reasoning": reasoning, "has_tool_calls": bool(tc),
+    }
+
+    if session.interrupted:
+        yield {"event": "interrupted", "ts": ms()}
+        return
+
+    # ── Agentic tool loop ────────────────────────────────────────────────────
+    current = raw_llm
+    conversation = list(messages)
+
+    for round_num in range(_MAX_TOOL_ROUNDS):
+        _, _, tool_calls = parse_response(current)
+        if not tool_calls:
+            break
+
+        local_calls   = [c for c in tool_calls if is_local_tool(c.name)] if memory_tools_enabled else []
+        gateway_calls = [c for c in tool_calls if not is_local_tool(c.name)]
+        results: list[dict] = []
+
+        for call in local_calls:
+            yield {"event": "tool_call", "ts": ms(), "round": round_num + 1,
+                   "tool": call.name, "params": call.params, "kind": "local"}
+            t_tool = time.monotonic()
+            result = await execute_local_tool_async(call, _agent_id or "", session.session_id)
+            tool_elapsed = int((time.monotonic() - t_tool) * 1000)
+            yield {"event": "tool_result", "ts": ms(), "round": round_num + 1,
+                   "tool": call.name, "status": result.get("status"),
+                   "data": result.get("data"), "reason": result.get("reason"),
+                   "elapsed_ms": tool_elapsed}
+            results.append(result)
+
+        if gateway_calls:
+            if um_api_key:
+                for call in gateway_calls:
+                    yield {"event": "tool_call", "ts": ms(), "round": round_num + 1,
+                           "tool": call.name, "params": call.params, "kind": "gateway"}
+                t_tool = time.monotonic()
+                gw_results = await execute_tool_calls(gateway_calls, um_api_key, session.session_id)
+                tool_elapsed = int((time.monotonic() - t_tool) * 1000)
+                per_tool_ms = tool_elapsed // max(len(gw_results), 1)
+                for i, r in enumerate(gw_results):
+                    if _agent_id:
+                        append_history_event(
+                            _agent_id, "tool_call", session_id=session.session_id,
+                            tool=r.get("tool", "unknown"), status=r.get("status", "unknown"),
+                        )
+                    yield {"event": "tool_result", "ts": ms(), "round": round_num + 1,
+                           "tool": gateway_calls[i].name, "status": r.get("status"),
+                           "data": r.get("data"), "reason": r.get("reason"),
+                           "elapsed_ms": per_tool_ms}
+                results.extend(gw_results)
+            else:
+                for call in gateway_calls:
+                    yield {"event": "tool_call", "ts": ms(), "round": round_num + 1,
+                           "tool": call.name, "params": call.params, "kind": "gateway"}
+                    yield {"event": "tool_result", "ts": ms(), "round": round_num + 1,
+                           "tool": call.name, "status": "error",
+                           "reason": "No ToolGateway API key configured for this agent",
+                           "data": None, "elapsed_ms": 0}
+                    results.append({"tool": call.name, "status": "error",
+                                    "reason": "No ToolGateway API key configured"})
+
+        if not results:
+            break
+
+        tool_msg = format_tool_results_for_llm(results)
+        conversation = conversation + [
+            {"role": "assistant", "content": current},
+            {"role": "user", "content": tool_msg},
+        ]
+
+        yield {"event": "llm_start", "ts": ms(), "round": round_num + 1,
+               "message_count": len(conversation)}
+        try:
+            t_llm = time.monotonic()
+            current, _ = await _call_llm(conversation, ai_gateway_token)
+            llm_elapsed = int((time.monotonic() - t_llm) * 1000)
+        except Exception as exc:
+            yield {"event": "error", "ts": ms(), "message": str(exc)}
+            return
+
+        _, _, tc = parse_response(current)
+        yield {"event": "llm_done", "ts": ms(), "round": round_num + 1,
+               "elapsed_ms": llm_elapsed, "raw_llm": current, "has_tool_calls": bool(tc)}
+
+        if session.interrupted:
+            yield {"event": "interrupted", "ts": ms()}
+            return
+
+    # ── Parse annotations ────────────────────────────────────────────────────
+    clean_text, annotations, _ = parse_response(current)
+    yield {"event": "parse", "ts": ms(),
+           "clean_text": clean_text, "annotation_count": len(annotations)}
+
+    # ── TTS ──────────────────────────────────────────────────────────────────
+    duration_ms = None
+    sample_rate = None
+    timeline: list[TimelineEvent] = []
+
+    if voice_enabled:
+        yield {"event": "tts_start", "ts": ms()}
+        try:
+            t_tts = time.monotonic()
+            tts = await synthesize(clean_text, voice_config)
+            tts_elapsed = int((time.monotonic() - t_tts) * 1000)
+            audio_b64   = tts.get("audio")
+            duration_ms = tts.get("duration_ms")
+            sample_rate = tts.get("sample_rate")
+            buffer_bytes = tts.get("buffer_bytes")
+            timeline    = assemble_timeline(annotations, clean_text, tts)
+            viseme_count = sum(1 for e in timeline if e.type == "viseme")
+            yield {"event": "tts_done", "ts": ms(), "elapsed_ms": tts_elapsed,
+                   "duration_ms": duration_ms, "sample_rate": sample_rate,
+                   "viseme_count": viseme_count}
+        except Exception as exc:
+            yield {"event": "tts_error", "ts": ms(), "message": str(exc)}
+            audio_b64 = None
+            buffer_bytes = None
+    else:
+        audio_b64 = None
+        buffer_bytes = None
+
+    # ── Session bookkeeping (same as process_text) ───────────────────────────
+    session.add_turn(user_text, clean_text)
+    session.logger.log_assistant(
+        turn=turn, text=clean_text, raw_llm=current,
+        audio_b64=audio_b64, duration_ms=duration_ms,
+        timeline=[e.model_dump() for e in timeline],
+    )
+
+    yield {
+        "event": "done",
+        "ts": ms(),
+        "total_ms": ms(),
+        "text": clean_text,
+        "reasoning": reasoning,
+        "timeline": [e.model_dump() for e in timeline],
+        "duration_ms": duration_ms,
+        "sample_rate": sample_rate,
+    }
