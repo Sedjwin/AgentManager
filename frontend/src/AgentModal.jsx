@@ -110,6 +110,7 @@ export default function AgentModal({ agent, onClose, onSaved }) {
 
   // Appearance shape sliders
   const [faceRound, setFaceRound]   = useState(ap.face_roundness ?? 0.5)
+  const [eyeCount, setEyeCount]     = useState(ap.eye_count ?? 2)
   const [eyeSize, setEyeSize]       = useState(ap.eye_size ?? 0.5)
   const [eyeRound, setEyeRound]     = useState(ap.eye_shape_roundness ?? 0.5)
   const [mouthWidth, setMouthWidth] = useState(ap.mouth_width ?? 0.5)
@@ -169,6 +170,7 @@ export default function AgentModal({ agent, onClose, onSaved }) {
       tagline,
       appearance: {
         face_roundness: faceRound, face_width: ap.face_width ?? 0.5, face_height: ap.face_height ?? 0.6,
+        eye_count: eyeCount,
         eye_size: eyeSize, eye_spacing: ap.eye_spacing ?? 0.5, eye_height: ap.eye_height ?? 0.55,
         eye_shape_roundness: eyeRound, pupil_size: ap.pupil_size ?? 0.6,
         mouth_width: mouthWidth, mouth_height: ap.mouth_height ?? 0.35, mouth_thickness: ap.mouth_thickness ?? 0.3,
@@ -280,6 +282,14 @@ export default function AgentModal({ agent, onClose, onSaved }) {
 
                 <div className="space-y-3">
                   <h4 className="text-xs text-gray-600 uppercase tracking-wider">Appearance</h4>
+                  <Field label="Eye Count">
+                    <select value={eyeCount} onChange={e => setEyeCount(parseInt(e.target.value))}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-amber-500">
+                      <option value={0}>Visor / line</option>
+                      <option value={1}>Single (centred)</option>
+                      <option value={2}>Two eyes</option>
+                    </select>
+                  </Field>
                   <div className="grid grid-cols-2 gap-4">
                     <Slider label="Face Roundness" value={faceRound} onChange={setFaceRound} />
                     <Slider label="Eye Size" value={eyeSize} onChange={setEyeSize} />
