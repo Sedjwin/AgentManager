@@ -180,6 +180,7 @@ Optional headers: `X-User-Id`, `X-Username` (for session logging).
 | POST   | `/sessions/{session_id}/audio`   | None | Upload WAV → STT + `AgentResponse`               |
 | POST   | `/sessions/{session_id}/stream`  | None | Send text → SSE stream of `AgentResponse` chunks |
 | GET    | `/sessions/{session_id}/stream`  | None | Same as above but via query param `?text=...`    |
+| POST   | `/sessions/{session_id}/debug`   | None | Send text → SSE stream of raw pipeline events    |
 
 **Text message request:**
 ```json
@@ -213,6 +214,25 @@ Optional headers: `X-User-Id`, `X-Username` (for session logging).
 ```
 
 `transcript` is present only when input was audio. `audio` is null for functional agents or when `voice_enabled` is false. `timeline` `t` values are milliseconds from audio start. `reasoning` is the model's chain-of-thought from thinking models (e.g. DeepSeek R1, Claude extended thinking) — `null` for standard models. In streaming mode it is attached to the first chunk only.
+
+#### Debug SSE endpoint — `POST /sessions/{session_id}/debug`
+
+Streams one JSON event per `data:` line as each pipeline step completes. Use this to observe the pipeline in real-time (Dashboard's Agent Pipeline Inspector uses this endpoint).
+
+```
+{"event": "start",       "ts": 0,    "user_text": "Hello"}
+{"event": "llm_start",   "ts": 12,   "round": 0, "message_count": 4}
+{"event": "llm_done",    "ts": 1840, "round": 0, "elapsed_ms": 1828, "raw_llm": "...", "has_tool_calls": false}
+{"event": "tool_call",   "ts": ...,  "round": 1, "tool": "get-time", "kind": "gateway"}
+{"event": "tool_result", "ts": ...,  "round": 1, "tool": "get-time", "status": "ok", "data": {...}}
+{"event": "parse",       "ts": ...,  "clean_text": "...", "annotation_count": 3, "annotations": [...]}
+{"event": "tts_start",   "ts": ...}
+{"event": "tts_done",    "ts": ...,  "elapsed_ms": 920, "duration_ms": 2400, "viseme_count": 47}
+{"event": "done",        "ts": ...,  "total_ms": 3100, "text": "...", "audio": "<base64>", "timeline": [...]}
+data: [DONE]
+```
+
+`ts` is milliseconds from the start of the request. `audio` in the `done` event is the full base64 WAV (same as `/message`). For non-voice agents, `done` omits `audio` and `timeline` contains only emotion/action events with char-proportional timestamps over a 5-second window.
 
 ---
 

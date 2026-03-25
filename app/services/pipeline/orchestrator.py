@@ -587,9 +587,10 @@ async def process_text_debug(
             return
 
     # ── Parse annotations ────────────────────────────────────────────────────
-    clean_text, annotations, _ = parse_response(current)
+    clean_text, annotations, _ = parse_response(current, profile)
     yield {"event": "parse", "ts": ms(),
-           "clean_text": clean_text, "annotation_count": len(annotations)}
+           "clean_text": clean_text, "annotation_count": len(annotations),
+           "annotations": [{"char": a.char, "type": a.type, "value": a.value} for a in annotations]}
 
     # ── TTS ──────────────────────────────────────────────────────────────────
     duration_ms = None
@@ -618,6 +619,10 @@ async def process_text_debug(
     else:
         audio_b64 = None
         buffer_bytes = None
+        total = max(len(clean_text), 1)
+        for ann in annotations:
+            t = int((ann.char / total) * 5000)
+            timeline.append(TimelineEvent(t=t, type=ann.type, value=ann.value))
 
     # ── Session bookkeeping (same as process_text) ───────────────────────────
     session.add_turn(user_text, clean_text)
@@ -633,7 +638,8 @@ async def process_text_debug(
         "total_ms": ms(),
         "text": clean_text,
         "reasoning": reasoning,
-        "timeline": [e.model_dump() for e in timeline],
+        "audio": audio_b64,
         "duration_ms": duration_ms,
         "sample_rate": sample_rate,
+        "timeline": [e.model_dump() for e in timeline],
     }
