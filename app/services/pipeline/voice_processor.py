@@ -10,7 +10,13 @@ from app.config import settings
 
 async def transcribe(audio_bytes: bytes) -> str:
     """Send raw WAV bytes to VoiceService STT. Returns transcript string."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    timeout = httpx.Timeout(
+        connect=10.0,
+        read=settings.voiceservice_stt_timeout_s,
+        write=settings.voiceservice_stt_timeout_s,
+        pool=10.0,
+    )
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             f"{settings.voiceservice_url}/stt",
             content=audio_bytes,
@@ -34,7 +40,13 @@ async def synthesize(text: str, voice_config: dict[str, Any] | None) -> dict[str
 
     payload: dict[str, Any] = {"text": text, "voice": voice_id}
 
-    async with httpx.AsyncClient(timeout=600.0) as client:
+    timeout = httpx.Timeout(
+        connect=10.0,
+        read=settings.voiceservice_tts_timeout_s,
+        write=settings.voiceservice_tts_timeout_s,
+        pool=10.0,
+    )
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             f"{settings.voiceservice_url}/tts",
             json=payload,
