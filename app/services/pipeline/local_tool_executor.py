@@ -25,6 +25,7 @@ LOCAL_TOOL_NAMES: set[str] = {
     "list-sessions",
     "read-session",
     "ask-agent",
+    "workspace.files",
 }
 
 # Injected into every agent's system prompt regardless of ToolGateway tool configuration.
@@ -57,7 +58,28 @@ Current session ID: {current_session_id}
 RULES:
 - When a user asks you to "remember", "note", "save", or "keep" something across sessions, you MUST call update-personal-context immediately in that same response. Do not just say you will remember — call the tool or it will not be saved.
 - When asked to recall something from a previous session: call list-sessions, then read-session on the sessions with the highest turn_count. Skip ONLY sessions where turn_count=1 (those are system sessions). Sessions with turn_count=null are old sessions that may contain real conversations — read them too. Read as many sessions as needed until you find what you're looking for.
-- Do NOT call read-session on your own current session ID listed above.\
+- Do NOT call read-session on your own current session ID listed above.
+
+---
+WORKSPACE:
+You have a private file workspace for this session. Use {tool:workspace.files|operation=...|...} syntax.
+
+{tool:workspace.files|operation=list|path=.}
+  List files and folders at path (use . for workspace root).
+
+{tool:workspace.files|operation=read|path=<relative/path>}
+  Read a file. Returns content and line count.
+
+{tool:workspace.files|operation=write|path=<relative/path>|content=<text>}
+  Write (create or overwrite) a file. Use \\n for newlines in content.
+
+{tool:workspace.files|operation=edit|path=<relative/path>|start_line=<N>|end_line=<M>|new_content=<text>}
+  Replace lines N–M (1-indexed, inclusive) with new_content. Use \\n for newlines.
+  Always read the file first to get correct line numbers before editing.
+
+RULES:
+- Paths are relative to your workspace. Subdirectories are created automatically.
+- Files persist for the session only. Save important outputs to personal-context or summarise them in conversation.\
 """
 
 
@@ -159,6 +181,9 @@ def execute_local_tool(call: ToolCall, agent_id: str, session_id: str | None = N
             events = read_session_conversation(agent_id, sid)
             return {"tool": call.name, "status": "ok", "data": {"events": events, "count": len(events)}}
 
+        elif call.name == "workspace.files":
+            return _workspace_files(call, agent_id, session_id)
+
         elif call.name == "ask-agent":
             # ask-agent is async — callers should use execute_local_tool_async instead
             return {"tool": call.name, "status": "error", "reason": "ask-agent requires async context"}
@@ -168,6 +193,70 @@ def execute_local_tool(call: ToolCall, agent_id: str, session_id: str | None = N
         return {"tool": call.name, "status": "error", "reason": str(exc)}
 
     return {"tool": call.name, "status": "error", "reason": f"Unknown local tool: {call.name}"}
+
+
+def _workspace_files(call: ToolCall, agent_id: str, session_id: str | None) -> dict:
+    """Read, write, or edit files in the agent's session workspace."""
+    from pathlib import Path
+
+    operation = call.params.get("operation", "")
+    raw_path = call.params.get("path", ".")
+
+    if not operation:
+        return {"tool": call.name, "status": "error", "reason": "operation required: read|write|edit|list"}
+    if not session_id:
+        return {"tool": call.name, "status": "error", "reason": "no active session — workspace unavailable"}
+
+    workspace = Path("data/agents") / agent_id / "sessions" / session_id / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    # Prevent path traversal
+    try:
+        target = (workspace / raw_path).resolve()
+        target.relative_to(workspace.resolve())
+    except ValueError:
+        return {"tool": call.name, "status": "error", "reason": "path outside workspace not allowed"}
+
+    if operation in ("read", "list"):
+        if not target.exists():
+            return {"tool": call.name, "status": "error", "reason": f"not found: {raw_path}"}
+        if target.is_dir():
+            entries = sorted(p.name + ("/" if p.is_dir() else "") for p in target.iterdir())
+            return {"tool": call.name, "status": "ok", "data": {"path": raw_path, "entries": entries}}
+        content = target.read_text(encoding="utf-8", errors="replace")
+        return {"tool": call.name, "status": "ok", "data": {"path": raw_path, "content": content, "lines": len(content.splitlines())}}
+
+    elif operation == "write":
+        content = call.params.get("content", "").replace("\\n", "\n")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return {"tool": call.name, "status": "ok", "data": {"path": raw_path, "bytes": len(content.encode())}}
+
+    elif operation == "edit":
+        if not target.exists():
+            return {"tool": call.name, "status": "error", "reason": f"not found: {raw_path}"}
+        try:
+            start = int(call.params.get("start_line", 0))
+            end = int(call.params.get("end_line", 0))
+        except (ValueError, TypeError):
+            return {"tool": call.name, "status": "error", "reason": "start_line and end_line must be integers"}
+        if start < 1 or end < start:
+            return {"tool": call.name, "status": "error", "reason": "start_line must be >= 1 and <= end_line"}
+
+        new_content = call.params.get("new_content", "").replace("\\n", "\n")
+        lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+        if end > len(lines):
+            return {"tool": call.name, "status": "error", "reason": f"end_line {end} exceeds file length {len(lines)}"}
+
+        replacement = new_content.splitlines(keepends=True)
+        if replacement and not replacement[-1].endswith("\n"):
+            replacement[-1] += "\n"
+
+        updated = lines[: start - 1] + replacement + lines[end:]
+        target.write_text("".join(updated), encoding="utf-8")
+        return {"tool": call.name, "status": "ok", "data": {"path": raw_path, "replaced": f"{start}-{end}", "new_line_count": len(replacement)}}
+
+    return {"tool": call.name, "status": "error", "reason": f"unknown operation '{operation}' — use read|write|edit|list"}
 
 
 async def _ask_agent(call: ToolCall, caller_agent_id: str, session_id: str | None) -> dict:
