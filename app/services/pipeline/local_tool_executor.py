@@ -92,7 +92,8 @@ RULES:
   Generate a public download URL for a file in your workspace.
   Returns a URL the user can click to download the file directly from their browser.
   Example: {tool:workspace.files|operation=link|path=downloads/report.pdf}
-  → Always offer this link to the user after saving or generating a file they may want to download.\
+  → Always offer this as a markdown link: [filename.pdf](url)
+  → The chat will render it as a clickable download button.\
 """
 
 
