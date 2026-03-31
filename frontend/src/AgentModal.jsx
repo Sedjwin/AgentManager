@@ -329,12 +329,12 @@ export default function AgentModal({ agent, onClose, onSaved }) {
               </div>
             )}
           </div>
-          {/* Memory Tools */}
+          {/* Essential Tools */}
           <div className="space-y-3">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Memory Tools</h3>
-            <Toggle label="Enable built-in memory tools" checked={memoryToolsEnabled} onChange={setMemoryToolsEnabled} />
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Essential Tools</h3>
+            <Toggle label="Enable essential built-in tools" checked={memoryToolsEnabled} onChange={setMemoryToolsEnabled} />
             <p className="text-xs text-gray-600">
-              Gives the agent access to <span className="font-mono text-gray-500">update-personal-context</span>, <span className="font-mono text-gray-500">read-history</span>, <span className="font-mono text-gray-500">ask-agent</span>, and related built-in tools. Disable for agents that should not self-modify memory or communicate with other agents.
+              Gives the agent access to built-in tools injected automatically into the system prompt: <span className="font-mono text-gray-500">workspace.files</span> (session file workspace), <span className="font-mono text-gray-500">update-personal-context</span>, <span className="font-mono text-gray-500">read-history</span>, <span className="font-mono text-gray-500">ask-agent</span>, and related tools. Disable only for agents that should have no memory, file access, or inter-agent communication.
             </p>
           </div>
 
