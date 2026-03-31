@@ -86,7 +86,13 @@ You have a private file workspace for this session. Use {tool:workspace.files|op
 
 RULES:
 - Paths are relative to your workspace. Subdirectories are created automatically.
-- Files persist for the session only. Save important outputs to personal-context or summarise them in conversation.\
+- Files persist for the session only. Save important outputs to personal-context or summarise them in conversation.
+
+{tool:workspace.files|operation=link|path=<relative/path>}
+  Generate a public download URL for a file in your workspace.
+  Returns a URL the user can click to download the file directly from their browser.
+  Example: {tool:workspace.files|operation=link|path=downloads/report.pdf}
+  → Always offer this link to the user after saving or generating a file they may want to download.\
 """
 
 
@@ -302,7 +308,14 @@ def _workspace_files(call: ToolCall, agent_id: str, session_id: str | None) -> d
                 break
         return {"tool": call.name, "status": "ok", "data": {"pattern": pattern, "hits": hits, "count": len(hits)}}
 
-    return {"tool": call.name, "status": "error", "reason": f"unknown operation '{operation}' — use read|write|edit|list|search|grep"}
+    elif operation == "link":
+        if not target.exists() or not target.is_file():
+            return {"tool": call.name, "status": "error", "reason": f"file not found: {raw_path}"}
+        rel = str(target.relative_to(workspace.resolve()))
+        url = f"{settings.webservice_files_url}/{agent_id}/{session_id}/{rel}"
+        return {"tool": call.name, "status": "ok", "data": {"path": raw_path, "url": url}}
+
+    return {"tool": call.name, "status": "error", "reason": f"unknown operation '{operation}' — use read|write|edit|list|search|grep|link"}
 
 
 async def _ask_agent(call: ToolCall, caller_agent_id: str, session_id: str | None) -> dict:
