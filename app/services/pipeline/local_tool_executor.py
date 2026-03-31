@@ -54,6 +54,7 @@ You have built-in tools for managing your persistent memory and communicating wi
   Send a message to another agent and receive their response. The other agent decides what to share based on their own context and judgment. Use this to consult specialists or coordinate tasks across agents.
 
 Current session ID: {current_session_id}
+Current agent ID:   {current_agent_id}
 
 RULES:
 - When a user asks you to "remember", "note", "save", or "keep" something across sessions, you MUST call update-personal-context immediately in that same response. Do not just say you will remember — call the tool or it will not be saved.
@@ -76,6 +77,12 @@ You have a private file workspace for this session. Use {tool:workspace.files|op
 {tool:workspace.files|operation=edit|path=<relative/path>|start_line=<N>|end_line=<M>|new_content=<text>}
   Replace lines N–M (1-indexed, inclusive) with new_content. Use \\n for newlines.
   Always read the file first to get correct line numbers before editing.
+
+{tool:workspace.files|operation=search|pattern=<glob>|path=.}
+  Find files by name pattern within the workspace (e.g. pattern=*.py, pattern=**/*.json).
+
+{tool:workspace.files|operation=grep|pattern=<text or regex>|path=.}
+  Search file contents for a pattern. Returns matching file paths, line numbers, and lines.
 
 RULES:
 - Paths are relative to your workspace. Subdirectories are created automatically.
@@ -256,7 +263,46 @@ def _workspace_files(call: ToolCall, agent_id: str, session_id: str | None) -> d
         target.write_text("".join(updated), encoding="utf-8")
         return {"tool": call.name, "status": "ok", "data": {"path": raw_path, "replaced": f"{start}-{end}", "new_line_count": len(replacement)}}
 
-    return {"tool": call.name, "status": "error", "reason": f"unknown operation '{operation}' — use read|write|edit|list"}
+    elif operation == "search":
+        pattern = call.params.get("pattern", "*")
+        import fnmatch
+        matches = []
+        for p in sorted(workspace.rglob("*")):
+            if p.is_file() and fnmatch.fnmatch(p.name, pattern.lstrip("**/") if "/" not in pattern else pattern):
+                matches.append(str(p.relative_to(workspace)))
+        # Also support full glob via Path.glob
+        if not matches and ("/" in pattern or "**" in pattern):
+            matches = [str(p.relative_to(workspace)) for p in sorted(workspace.glob(pattern)) if p.is_file()]
+        return {"tool": call.name, "status": "ok", "data": {"pattern": pattern, "matches": matches, "count": len(matches)}}
+
+    elif operation == "grep":
+        import re as _re
+        pattern = call.params.get("pattern", "")
+        search_path = call.params.get("path", ".")
+        if not pattern:
+            return {"tool": call.name, "status": "error", "reason": "pattern is required for grep"}
+        try:
+            search_root = (workspace / search_path).resolve()
+            search_root.relative_to(workspace.resolve())
+        except ValueError:
+            return {"tool": call.name, "status": "error", "reason": "path outside workspace not allowed"}
+        hits = []
+        for p in sorted(search_root.rglob("*")):
+            if not p.is_file():
+                continue
+            try:
+                for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                    if _re.search(pattern, line):
+                        hits.append({"file": str(p.relative_to(workspace)), "line": i, "content": line.strip()})
+                        if len(hits) >= 200:
+                            break
+            except Exception:
+                continue
+            if len(hits) >= 200:
+                break
+        return {"tool": call.name, "status": "ok", "data": {"pattern": pattern, "hits": hits, "count": len(hits)}}
+
+    return {"tool": call.name, "status": "error", "reason": f"unknown operation '{operation}' — use read|write|edit|list|search|grep"}
 
 
 async def _ask_agent(call: ToolCall, caller_agent_id: str, session_id: str | None) -> dict:

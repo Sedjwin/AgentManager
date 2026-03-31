@@ -60,6 +60,7 @@ async def process_text(
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
+        current_agent_id=_agent_id,
     )
 
     # Step 2b: Call AIGateway
@@ -160,6 +161,7 @@ async def process_audio(
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
+        current_agent_id=_agent_id,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
@@ -254,6 +256,7 @@ async def process_text_streaming(
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
+        current_agent_id=_agent_id,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
@@ -480,6 +483,7 @@ async def process_text_debug(
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
+        current_agent_id=_agent_id,
     )
 
     # ── Round 0: initial LLM call ────────────────────────────────────────────

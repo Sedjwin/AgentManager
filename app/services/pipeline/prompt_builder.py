@@ -29,12 +29,14 @@ def build_messages(
     task_list: str | None = None,
     memory_tools_enabled: bool = True,
     current_session_id: str | None = None,
+    current_agent_id: str | None = None,
 ) -> list[dict[str, str]]:
     system = _build_system(
         agent_system_prompt, profile, tool_use_enabled, tool_skill_mds or [],
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=current_session_id,
+        current_agent_id=current_agent_id,
     )
     messages = [{"role": "system", "content": system}]
     messages.extend(history)
@@ -51,6 +53,7 @@ def _build_system(
     task_list: str | None = None,
     memory_tools_enabled: bool = True,
     current_session_id: str | None = None,
+    current_agent_id: str | None = None,
 ) -> str:
     base = agent_system_prompt
 
@@ -94,6 +97,8 @@ Rules:
     if memory_tools_enabled:
         skill_md = LOCAL_TOOL_SKILL_MD.replace(
             "{current_session_id}", current_session_id or "(unknown)"
+        ).replace(
+            "{current_agent_id}", current_agent_id or "(unknown)"
         )
         base += "\n\n" + skill_md
 
