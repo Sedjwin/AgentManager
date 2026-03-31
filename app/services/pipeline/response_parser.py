@@ -12,7 +12,8 @@ _TAG_RE = re.compile(r"\{\s*(emotion|action)\s*:\s*([a-zA-Z0-9_]+)\s*\}")
 _BARE_TAG_RE = re.compile(r"\{\s*([a-zA-Z0-9_]+)\s*\}")
 
 # Matches {tool:name} or {tool:name|key=value|key=value}
-_TOOL_RE = re.compile(r"\{\s*tool\s*:\s*([a-zA-Z0-9_-]+)([^}]*)?\s*\}")
+# Tool names may use dots for namespacing (e.g. device.led-matrix-01.display_animation)
+_TOOL_RE = re.compile(r"\{\s*tool\s*:\s*([a-zA-Z0-9_.\-]+)([^}]*)?\s*\}")
 
 
 @dataclass
