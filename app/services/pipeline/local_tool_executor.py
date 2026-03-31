@@ -93,7 +93,15 @@ RULES:
   Returns a URL the user can click to download the file directly from their browser.
   Example: {tool:workspace.files|operation=link|path=downloads/report.pdf}
   → Always offer this as a markdown link: [filename.pdf](url)
-  → The chat will render it as a clickable download button.\
+  → The chat will render it as a clickable download button.
+
+{tool:workspace.files|operation=archive|files=<comma-separated paths>|output=<name.zip>}
+  Create a zip, 7z, or tar.gz archive from files in your workspace.
+  - files: comma-separated relative paths, or * to include everything
+  - output: archive filename — must end in .zip, .7z, or .tar.gz
+  Returns the archive path, size, and a ready-to-use download URL.
+  Example: {tool:workspace.files|operation=archive|files=report.pdf,data.csv,images/chart.png|output=bundle.zip}
+  → After creating the archive, offer it as: [bundle.zip](url)\
 """
 
 
@@ -316,7 +324,95 @@ def _workspace_files(call: ToolCall, agent_id: str, session_id: str | None) -> d
         url = f"{settings.webservice_files_url}/{agent_id}/{session_id}/{rel}"
         return {"tool": call.name, "status": "ok", "data": {"path": raw_path, "url": url}}
 
-    return {"tool": call.name, "status": "error", "reason": f"unknown operation '{operation}' — use read|write|edit|list|search|grep|link"}
+    elif operation == "archive":
+        return _workspace_archive(call, workspace, agent_id, session_id)
+
+    return {"tool": call.name, "status": "error", "reason": f"unknown operation '{operation}' — use read|write|edit|list|search|grep|link|archive"}
+
+
+def _workspace_archive(call: ToolCall, workspace: "Path", agent_id: str, session_id: str | None) -> dict:
+    """Create a zip, 7z, or tar.gz archive from workspace files using the system 7z binary."""
+    import subprocess
+    from pathlib import Path
+
+    raw_files = call.params.get("files", "")
+    output = call.params.get("output", "").strip()
+
+    if not raw_files:
+        return {"tool": call.name, "status": "error", "reason": "files parameter is required (comma-separated paths, or * for all)"}
+    if not output:
+        return {"tool": call.name, "status": "error", "reason": "output parameter is required (e.g. archive.zip, bundle.7z, files.tar.gz)"}
+
+    # Validate output extension
+    ext = "".join(Path(output).suffixes).lower()
+    if ext not in (".zip", ".7z", ".tar.gz"):
+        return {"tool": call.name, "status": "error", "reason": "output must end in .zip, .7z, or .tar.gz"}
+
+    # Prevent path traversal in output
+    try:
+        out_path = (workspace / output).resolve()
+        out_path.relative_to(workspace.resolve())
+    except ValueError:
+        return {"tool": call.name, "status": "error", "reason": "output path outside workspace not allowed"}
+
+    # Resolve input files
+    if raw_files.strip() == "*":
+        file_paths = [p for p in workspace.rglob("*") if p.is_file() and p.resolve() != out_path]
+    else:
+        file_paths = []
+        missing = []
+        for f in [f.strip() for f in raw_files.split(",") if f.strip()]:
+            try:
+                p = (workspace / f).resolve()
+                p.relative_to(workspace.resolve())
+            except ValueError:
+                return {"tool": call.name, "status": "error", "reason": f"path outside workspace not allowed: {f}"}
+            if not p.exists():
+                missing.append(f)
+            else:
+                file_paths.append(p)
+        if missing:
+            return {"tool": call.name, "status": "error", "reason": f"files not found: {', '.join(missing)}"}
+
+    if not file_paths:
+        return {"tool": call.name, "status": "error", "reason": "no files to archive"}
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.exists():
+        out_path.unlink()
+
+    # Build relative paths for the archive (preserves subdirectory structure)
+    rel_file_args = [str(p.relative_to(workspace)) for p in file_paths]
+
+    if ext == ".tar.gz":
+        cmd = ["7z", "a", "-ttar", "-so"] + rel_file_args
+        try:
+            tar_data = subprocess.check_output(cmd, cwd=str(workspace), stderr=subprocess.PIPE)
+            gz_cmd = ["7z", "a", "-tgzip", "-si", str(out_path)]
+            subprocess.run(gz_cmd, input=tar_data, check=True, capture_output=True, cwd=str(workspace))
+        except subprocess.CalledProcessError as e:
+            return {"tool": call.name, "status": "error", "reason": f"archive failed: {e.stderr.decode(errors='replace').strip()}"}
+    else:
+        fmt = "-tzip" if ext == ".zip" else "-t7z"
+        cmd = ["7z", "a", fmt, str(out_path)] + rel_file_args
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, cwd=str(workspace))
+        except subprocess.CalledProcessError as e:
+            return {"tool": call.name, "status": "error", "reason": f"archive failed: {e.stderr.decode(errors='replace').strip()}"}
+
+    size = out_path.stat().st_size
+    rel_out = str(out_path.relative_to(workspace))
+    url = f"{settings.webservice_files_url}/{agent_id}/{session_id}/{rel_out}"
+    return {
+        "tool": call.name,
+        "status": "ok",
+        "data": {
+            "output": rel_out,
+            "files_archived": len(file_paths),
+            "size_bytes": size,
+            "url": url,
+        },
+    }
 
 
 async def _ask_agent(call: ToolCall, caller_agent_id: str, session_id: str | None) -> dict:
