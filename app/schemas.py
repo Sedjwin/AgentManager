@@ -112,7 +112,7 @@ class TimelineEvent(BaseModel):
 
 class AgentResponse(BaseModel):
     session_id: str
-    text: str                               # clean text (tags stripped)
+    text: str = ""                          # clean text (tags stripped)
     reasoning: str | None = None            # chain-of-thought from thinking models
     transcript: str | None = None           # if input was audio
     audio: str | None = None               # base64 WAV
@@ -122,6 +122,7 @@ class AgentResponse(BaseModel):
     timeline: list[TimelineEvent] = []
     chunk_index: int = 0
     is_final: bool = True
+    tool_call: dict | None = None           # tool status event: {name, status, elapsed_ms?, reason?}
 
 
 class InterruptRequest(BaseModel):

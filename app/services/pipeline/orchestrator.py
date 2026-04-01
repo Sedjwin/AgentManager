@@ -263,10 +263,75 @@ async def process_text_streaming(
     if session.interrupted:
         return
 
-    raw_llm = await _resolve_tool_calls(
-        raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id,
-        memory_tools_enabled=memory_tools_enabled,
-    )
+    # Tool loop — inline so we can yield status events live
+    current = raw_llm
+    conversation = list(messages)
+    for round_num in range(_MAX_TOOL_ROUNDS):
+        _, _, tool_calls = parse_response(current)
+        if not tool_calls:
+            break
+
+        local_calls   = [c for c in tool_calls if is_local_tool(c.name)] if memory_tools_enabled else []
+        gateway_calls = [c for c in tool_calls if not is_local_tool(c.name)]
+        results: list[dict] = []
+
+        for call in local_calls:
+            yield AgentResponse(session_id=session.session_id, tool_call={"name": call.name, "status": "calling"})
+            t0 = time.monotonic()
+            result = await execute_local_tool_async(call, _agent_id, session.session_id)
+            elapsed = int((time.monotonic() - t0) * 1000)
+            yield AgentResponse(session_id=session.session_id, tool_call={
+                "name": call.name,
+                "status": result.get("status", "ok"),
+                "elapsed_ms": elapsed,
+                "reason": result.get("reason"),
+            })
+            results.append(result)
+
+        if gateway_calls:
+            if um_api_key:
+                for call in gateway_calls:
+                    yield AgentResponse(session_id=session.session_id, tool_call={"name": call.name, "status": "calling"})
+                t0 = time.monotonic()
+                gw_results = await execute_tool_calls(gateway_calls, um_api_key, session.session_id)
+                elapsed = int((time.monotonic() - t0) * 1000)
+                per_ms = elapsed // max(len(gw_results), 1)
+                for i, r in enumerate(gw_results):
+                    if _agent_id:
+                        append_history_event(_agent_id, "tool_call", session_id=session.session_id,
+                                             tool=r.get("tool", "unknown"), status=r.get("status", "unknown"))
+                    yield AgentResponse(session_id=session.session_id, tool_call={
+                        "name": gateway_calls[i].name,
+                        "status": r.get("status", "ok"),
+                        "elapsed_ms": per_ms,
+                        "reason": r.get("reason"),
+                    })
+                results.extend(gw_results)
+            else:
+                for call in gateway_calls:
+                    yield AgentResponse(session_id=session.session_id, tool_call={
+                        "name": call.name, "status": "error",
+                        "reason": "No ToolGateway API key configured",
+                    })
+                    results.append({"tool": call.name, "status": "error", "reason": "No ToolGateway API key"})
+
+        if not results:
+            break
+
+        tool_msg = format_tool_results_for_llm(results)
+        conversation = conversation + [
+            {"role": "assistant", "content": current},
+            {"role": "user", "content": tool_msg},
+        ]
+        current, _ = await _call_llm(conversation, ai_gateway_token)
+
+        if session.interrupted:
+            return
+
+    else:
+        logger.warning("Tool resolution reached max rounds (%d) — returning last response", _MAX_TOOL_ROUNDS)
+
+    raw_llm = current
 
     if session.interrupted:
         return
@@ -359,7 +424,7 @@ async def _call_llm(messages: list[dict[str, str]], token: str) -> tuple[str, st
         return content, reasoning
 
 
-_MAX_TOOL_ROUNDS = 5
+_MAX_TOOL_ROUNDS = 20
 
 
 async def _resolve_tool_calls(
