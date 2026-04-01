@@ -89,7 +89,7 @@ async def send_message(
     session, agent = await _load_session_and_agent(session_id, db)
     profile = json.loads(agent.profile) if agent.profile else None
     voice_config = json.loads(agent.voice_config) if agent.voice_config else None
-    tool_skill_mds = _get_tool_skill_mds(agent)
+    tool_skill_mds = await _get_tool_skill_mds(agent)
 
     try:
         return await process_text(
@@ -119,7 +119,7 @@ async def send_audio(
     session, agent = await _load_session_and_agent(session_id, db)
     profile = json.loads(agent.profile) if agent.profile else None
     voice_config = json.loads(agent.voice_config) if agent.voice_config else None
-    tool_skill_mds = _get_tool_skill_mds(agent)
+    tool_skill_mds = await _get_tool_skill_mds(agent)
 
     audio_bytes = await audio.read()
     try:
@@ -181,7 +181,7 @@ async def debug_message(
     session, agent = await _load_session_and_agent(session_id, db)
     profile      = json.loads(agent.profile)      if agent.profile      else None
     voice_config = json.loads(agent.voice_config) if agent.voice_config else None
-    tool_skill_mds = _get_tool_skill_mds(agent)
+    tool_skill_mds = await _get_tool_skill_mds(agent)
 
     async def event_gen() -> AsyncIterator[str]:
         try:
@@ -210,20 +210,49 @@ async def debug_message(
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
-def _get_tool_skill_mds(agent) -> list[str]:
-    """Extract ordered list of skill_md strings from the agent's enabled_tools JSON."""
+async def _get_tool_skill_mds(agent) -> list[str]:
+    """Return skill_md for each of the agent's enabled gateway tools.
+    Always fetches live skill_md from ToolGateway so the prompt stays current.
+    Local tools (workspace.files, memory tools) are excluded — they are already
+    documented in LOCAL_TOOL_SKILL_MD and injected separately.
+    Falls back to the cached value in enabled_tools if TG is unreachable.
+    """
+    import httpx
+    from app.config import settings
+    from app.services.pipeline.local_tool_executor import LOCAL_TOOL_NAMES
+
     try:
         tools_data = json.loads(agent.enabled_tools or "[]")
-        return [t["skill_md"] for t in tools_data if t.get("skill_md")]
     except Exception:
         return []
+
+    # Strip local tools — their docs come from LOCAL_TOOL_SKILL_MD
+    tools_data = [t for t in tools_data if t.get("name") not in LOCAL_TOOL_NAMES]
+
+    if not tools_data:
+        return []
+
+    cached = {t["name"]: t.get("skill_md", "") for t in tools_data if t.get("name")}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{settings.toolgateway_url}/api/tools")
+            if resp.status_code == 200:
+                live = {t["name"]: t.get("skill_md", "") for t in resp.json()}
+                return [live.get(t["name"], cached.get(t["name"], ""))
+                        for t in tools_data
+                        if live.get(t["name"], cached.get(t["name"], ""))]
+    except Exception:
+        pass  # TG unreachable — fall back to cached
+
+    return [t["skill_md"] for t in tools_data if t.get("skill_md")]
 
 
 async def _do_stream(session_id: str, text: str, db: AsyncSession) -> StreamingResponse:
     session, agent = await _load_session_and_agent(session_id, db)
     profile = json.loads(agent.profile) if agent.profile else None
     voice_config = json.loads(agent.voice_config) if agent.voice_config else None
-    tool_skill_mds = _get_tool_skill_mds(agent)
+    tool_skill_mds = await _get_tool_skill_mds(agent)
 
     async def event_generator() -> AsyncIterator[str]:
         async for chunk in process_text_streaming(
