@@ -60,6 +60,7 @@ RULES:
 - When a user asks you to "remember", "note", "save", or "keep" something across sessions, you MUST call update-personal-context immediately in that same response. Do not just say you will remember — call the tool or it will not be saved.
 - When asked to recall something from a previous session: call list-sessions, then read-session on the sessions with the highest turn_count. Skip ONLY sessions where turn_count=1 (those are system sessions). Sessions with turn_count=null are old sessions that may contain real conversations — read them too. Read as many sessions as needed until you find what you're looking for.
 - Do NOT call read-session on your own current session ID listed above.
+- TOOL CALL LIMIT: You may make at most 20 tool calls per message. If a task requires more, complete as much as possible, then tell the user what remains and ask them to send a follow-up message to continue.
 
 ---
 WORKSPACE:
