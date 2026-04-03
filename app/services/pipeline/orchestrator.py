@@ -408,7 +408,7 @@ async def process_text_streaming(
 
 async def _call_llm(messages: list[dict[str, str]], token: str) -> tuple[str, str | None]:
     """Call AIGateway. Returns (content, reasoning) — reasoning may be None."""
-    payload = {"messages": messages, "stream": False}
+    payload = {"messages": messages, "stream": False, "max_tokens": 16384}
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
             f"{settings.aigateway_url}/v1/chat/completions",

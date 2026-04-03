@@ -11,9 +11,8 @@ _TAG_RE = re.compile(r"\{\s*(emotion|action)\s*:\s*([a-zA-Z0-9_]+)\s*\}")
 # Matches any {word} or {word_word} — used for bare-name pass when profile present
 _BARE_TAG_RE = re.compile(r"\{\s*([a-zA-Z0-9_]+)\s*\}")
 
-# Matches {tool:name} or {tool:name|key=value|key=value}
-# Tool names may use dots for namespacing (e.g. device.led-matrix-01.display_animation)
-_TOOL_RE = re.compile(r"\{\s*tool\s*:\s*([a-zA-Z0-9_.\-]+)([^}]*)?\s*\}")
+# Detects the start of a tool tag — used by the manual scanner below
+_TOOL_START_RE = re.compile(r"\{\s*tool\s*:\s*([a-zA-Z0-9_.\-]+)")
 
 
 @dataclass
@@ -27,6 +26,92 @@ class Annotation:
 class ToolCall:
     name: str
     params: dict = field(default_factory=dict)
+
+
+_XML_TOOL_BLOCK_RE = re.compile(
+    r"<tool_call>\s*<tool:([a-zA-Z0-9_.\-]+)>(.*?)</tool_call>",
+    re.DOTALL | re.IGNORECASE,
+)
+_XML_PARAM_RE = re.compile(r"<parameter=([^>]+)>(.*?)</parameter>", re.DOTALL)
+
+
+def _normalize_xml_tool_calls(text: str) -> str:
+    """Convert XML-style tool calls to {tool:name|...} format.
+
+    Handles the hallucinated format:
+        <tool_call>
+        <tool:web.search>
+        <parameter=query>foo</parameter>
+        </tool_call>
+
+    Converts to:
+        {tool:web.search|query=foo}
+    """
+    def _replace(m: re.Match) -> str:
+        name = m.group(1)
+        body = m.group(2)
+        pairs = [
+            f"{pm.group(1).strip()}={pm.group(2).strip()}"
+            for pm in _XML_PARAM_RE.finditer(body)
+        ]
+        if pairs:
+            return "{tool:" + name + "|" + "|".join(pairs) + "}"
+        return "{tool:" + name + "}"
+
+    return _XML_TOOL_BLOCK_RE.sub(_replace, text)
+
+
+def _extract_tool_tags(text: str, tool_calls: list) -> str:
+    """Scan *text* for {tool:name|...} tags, append ToolCall objects to *tool_calls*,
+    and return the text with all tool tags removed.
+
+    Unlike a simple regex, this handles } characters inside parameter values
+    (e.g. HTML/CSS/JS content) by finding every possible closing } and choosing
+    the last one that falls before the next {tool: occurrence.
+    """
+    result_parts: list[str] = []
+    pos = 0
+    n = len(text)
+
+    while pos < n:
+        m = _TOOL_START_RE.search(text, pos)
+        if m is None:
+            result_parts.append(text[pos:])
+            break
+
+        tag_start = m.start()
+        tool_name = m.group(1)
+        after_name = m.end()  # index right after the tool name
+
+        # Find the next {tool: start (if any) — our closing } must come before it
+        next_m = _TOOL_START_RE.search(text, after_name)
+        search_end = next_m.start() if next_m else n
+
+        # Collect every } between after_name and search_end
+        closing_candidates = [
+            i for i in range(after_name, search_end)
+            if text[i] == "}"
+        ]
+
+        if not closing_candidates:
+            # Malformed — no closing brace; emit the literal { and advance past it
+            result_parts.append(text[pos: tag_start + 1])
+            pos = tag_start + 1
+            continue
+
+        # Pick the last candidate: maximises the captured param string
+        tag_end = closing_candidates[-1] + 1  # exclusive
+        params_raw = text[after_name: tag_end - 1]  # strip closing }
+
+        tool_calls.append(ToolCall(
+            name=tool_name,
+            params=_parse_tool_params(params_raw),
+        ))
+
+        result_parts.append(text[pos: tag_start])  # text before this tag
+        pos = tag_end
+
+    return "".join(result_parts)
 
 
 def _parse_tool_params(raw: str) -> dict:
@@ -58,15 +143,15 @@ def parse_response(
     """
     tool_calls: list[ToolCall] = []
 
-    # First pass: extract and remove tool tags, recording them in order
-    def _extract_tool(m: re.Match) -> str:
-        tool_calls.append(ToolCall(
-            name=m.group(1),
-            params=_parse_tool_params(m.group(2) or ""),
-        ))
-        return ""  # remove the tag from text
+    # Normalise any XML-style <tool_call> blocks the model may have hallucinated
+    normalised = _normalize_xml_tool_calls(raw)
 
-    after_tools = _TOOL_RE.sub(_extract_tool, raw)
+    # First pass: extract and remove tool tags using a manual scanner.
+    # We cannot use a simple [^}]* regex because parameter values (HTML, CSS, JS)
+    # legitimately contain } characters.  Strategy: for each {tool: start found,
+    # scan forward to find all }-terminated candidates; pick the last } that still
+    # produces a parseable param block before the next {tool: start (or end of string).
+    after_tools = _extract_tool_tags(normalised, tool_calls)
 
     # Build profile vocabulary lookups (only for interaction agents)
     emotion_names: set[str] = set()

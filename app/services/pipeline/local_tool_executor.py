@@ -74,6 +74,9 @@ You have a private file workspace for this session. Use {tool:workspace.files|op
 
 {tool:workspace.files|operation=write|path=<relative/path>|content=<text>}
   Write (create or overwrite) a file. Use \\n for newlines in content.
+  IMPORTANT: For large files (>100 lines), write in sections: use write for the first section,
+  then edit (append mode by setting start_line just past end) for each subsequent section.
+  Do NOT attempt to write an entire large file in one call — it will be truncated mid-content.
 
 {tool:workspace.files|operation=edit|path=<relative/path>|start_line=<N>|end_line=<M>|new_content=<text>}
   Replace lines N–M (1-indexed, inclusive) with new_content. Use \\n for newlines.
