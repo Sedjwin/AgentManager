@@ -21,7 +21,7 @@ from app.services.agent_memory import (
     read_task_list,
 )
 from app.services.pipeline.local_tool_executor import execute_local_tool_async, is_local_tool
-from app.services.pipeline.prompt_builder import build_messages
+from app.services.pipeline.prompt_builder import build_compact_system, build_messages
 from app.services.pipeline.response_parser import parse_response
 from app.services.pipeline.timeline_assembler import assemble_timeline
 from app.services.pipeline.tool_executor import execute_tool_calls, format_tool_results_for_llm
@@ -62,6 +62,13 @@ async def process_text(
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
     )
+    _compact_sys = build_compact_system(
+        agent_system_prompt, profile, tool_use_enabled, tool_skill_mds,
+        personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
+        current_session_id=session.session_id,
+        current_agent_id=_agent_id,
+    )
 
     # Step 2b: Call AIGateway
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
@@ -73,6 +80,7 @@ async def process_text(
     raw_llm = await _resolve_tool_calls(
         raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id,
         memory_tools_enabled=memory_tools_enabled,
+        compact_system=_compact_sys,
     )
 
     if session.interrupted:
@@ -163,6 +171,13 @@ async def process_audio(
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
     )
+    _compact_sys = build_compact_system(
+        agent_system_prompt, profile, tool_use_enabled, tool_skill_mds,
+        personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
+        current_session_id=session.session_id,
+        current_agent_id=_agent_id,
+    )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
@@ -171,6 +186,7 @@ async def process_audio(
     raw_llm = await _resolve_tool_calls(
         raw_llm, messages, ai_gateway_token, um_api_key, session.session_id, _agent_id,
         memory_tools_enabled=memory_tools_enabled,
+        compact_system=_compact_sys,
     )
 
     if session.interrupted:
@@ -258,6 +274,13 @@ async def process_text_streaming(
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
     )
+    _compact_sys = build_compact_system(
+        agent_system_prompt, profile, tool_use_enabled, tool_skill_mds,
+        personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
+        current_session_id=session.session_id,
+        current_agent_id=_agent_id,
+    )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
     if session.interrupted:
@@ -323,6 +346,8 @@ async def process_text_streaming(
             {"role": "assistant", "content": current},
             {"role": "user", "content": tool_msg},
         ]
+        # Swap to compact system from round 1 onward — model already has full docs
+        conversation = [{"role": "system", "content": _compact_sys}] + conversation[1:]
         current, _ = await _call_llm(conversation, ai_gateway_token)
 
         if session.interrupted:
@@ -435,12 +460,16 @@ async def _resolve_tool_calls(
     session_id: str | None,
     agent_id: str | None = None,
     memory_tools_enabled: bool = True,
+    compact_system: str | None = None,
 ) -> str:
     """
     Agentic tool loop: execute any {tool:name} tags in the LLM response, re-prompt
     with results, and repeat until the response contains no tool tags or _MAX_TOOL_ROUNDS
     is reached. Local memory tools execute directly; gateway tools route through ToolGateway.
     Returns the final LLM response (with no tool tags).
+
+    compact_system: if provided, replaces the system message from round 1 onward,
+    omitting full skill docs (which the model has already seen on round 0).
     """
     current = raw_llm
     conversation = list(messages)
@@ -489,6 +518,11 @@ async def _resolve_tool_calls(
             {"role": "assistant", "content": current},
             {"role": "user", "content": tool_msg},
         ]
+
+        # Swap to compact system from round 1 onward — model already has full docs
+        if compact_system and len(conversation) > 1:
+            conversation = [{"role": "system", "content": compact_system}] + conversation[1:]
+
         current, _ = await _call_llm(conversation, ai_gateway_token)
 
     logger.warning("Tool resolution reached max rounds (%d) — returning last response", _MAX_TOOL_ROUNDS)
@@ -545,6 +579,13 @@ async def process_text_debug(
     messages = build_messages(
         agent_system_prompt, profile, session.history, user_text,
         tool_use_enabled=tool_use_enabled, tool_skill_mds=tool_skill_mds,
+        personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
+        current_session_id=session.session_id,
+        current_agent_id=_agent_id,
+    )
+    _compact_sys = build_compact_system(
+        agent_system_prompt, profile, tool_use_enabled, tool_skill_mds,
         personal_context=personal_context, task_list=task_list,
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
@@ -636,6 +677,8 @@ async def process_text_debug(
             {"role": "assistant", "content": current},
             {"role": "user", "content": tool_msg},
         ]
+        # Swap to compact system from round 1 onward — model already has full docs
+        conversation = [{"role": "system", "content": _compact_sys}] + conversation[1:]
 
         yield {"event": "llm_start", "ts": ms(), "round": round_num + 1,
                "message_count": len(conversation)}

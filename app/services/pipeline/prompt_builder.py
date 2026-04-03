@@ -1,9 +1,10 @@
 """Builds the LLM messages list for a given agent and conversation turn."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from app.services.pipeline.local_tool_executor import LOCAL_TOOL_SKILL_MD
+from app.services.pipeline.local_tool_executor import LOCAL_TOOL_NAMES, LOCAL_TOOL_SKILL_MD
 
 
 _TOOL_PREAMBLE = """
@@ -16,6 +17,12 @@ Important:
 - The gateway may deny tool requests based on policy. If a call is denied, acknowledge it gracefully.
 - You may call tools across multiple rounds. After each round you will receive the results and can call more tools if needed.
 - Give your final response (with no tool tags) only once you have all the information you need."""
+
+_COMPACT_TOOL_NOTE = """
+---
+TOOLS: Full tool instructions were provided at the start of this conversation.
+Available tools: {tool_list}
+Use {{tool:name|param=value}} syntax as described earlier."""
 
 
 def build_messages(
@@ -44,6 +51,32 @@ def build_messages(
     return messages
 
 
+def build_compact_system(
+    agent_system_prompt: str,
+    profile: dict[str, Any] | None,
+    tool_use_enabled: bool,
+    tool_skill_mds: list[str] | None,
+    personal_context: str | None = None,
+    task_list: str | None = None,
+    memory_tools_enabled: bool = True,
+    current_session_id: str | None = None,
+    current_agent_id: str | None = None,
+) -> str:
+    """Compact system prompt for tool rounds > 0.
+
+    Replaces the full skill docs with a single-line tool list.  Saves ~1,500–2,000
+    prompt tokens per tool round — the model has already read the full docs once.
+    """
+    return _build_system(
+        agent_system_prompt, profile, tool_use_enabled, tool_skill_mds or [],
+        personal_context=personal_context, task_list=task_list,
+        memory_tools_enabled=memory_tools_enabled,
+        current_session_id=current_session_id,
+        current_agent_id=current_agent_id,
+        compact=True,
+    )
+
+
 def _build_system(
     agent_system_prompt: str,
     profile: dict[str, Any] | None,
@@ -54,6 +87,7 @@ def _build_system(
     memory_tools_enabled: bool = True,
     current_session_id: str | None = None,
     current_agent_id: str | None = None,
+    compact: bool = False,
 ) -> str:
     base = agent_system_prompt
 
@@ -93,20 +127,31 @@ Rules:
 - Write your spoken text naturally. The tags are invisible to the listener.
 - Your response will be spoken aloud via text-to-speech. Write naturally — no markdown, no bullet points unless asked."""
 
-    # Inject memory tools if enabled (on by default)
-    if memory_tools_enabled:
-        skill_md = LOCAL_TOOL_SKILL_MD.replace(
-            "{current_session_id}", current_session_id or "(unknown)"
-        ).replace(
-            "{current_agent_id}", current_agent_id or "(unknown)"
-        )
-        base += "\n\n" + skill_md
+    if compact:
+        # Compact mode: replace full skill docs with a brief tool list
+        all_tool_names: list[str] = sorted(LOCAL_TOOL_NAMES) if memory_tools_enabled else []
+        if tool_use_enabled and tool_skill_mds:
+            gateway_names = re.findall(r"\{tool:([a-zA-Z0-9_.\-]+)", "\n".join(tool_skill_mds))
+            seen: dict[str, None] = {}
+            for n in gateway_names:
+                seen[n] = None
+            all_tool_names += [n for n in seen if n not in set(all_tool_names)]
+        if all_tool_names:
+            base += _COMPACT_TOOL_NOTE.format(tool_list=", ".join(all_tool_names))
+    else:
+        # Full mode: inject complete skill docs
+        if memory_tools_enabled:
+            skill_md = LOCAL_TOOL_SKILL_MD.replace(
+                "{current_session_id}", current_session_id or "(unknown)"
+            ).replace(
+                "{current_agent_id}", current_agent_id or "(unknown)"
+            )
+            base += "\n\n" + skill_md
 
-    # Inject gateway tools if configured
-    if tool_use_enabled and tool_skill_mds:
-        base += _TOOL_PREAMBLE
-        for md in tool_skill_mds:
-            if md.strip():
-                base += "\n\n" + md.strip()
+        if tool_use_enabled and tool_skill_mds:
+            base += _TOOL_PREAMBLE
+            for md in tool_skill_mds:
+                if md.strip():
+                    base += "\n\n" + md.strip()
 
     return base
