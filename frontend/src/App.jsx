@@ -144,6 +144,7 @@ function AgentApp({ user, logout }) {
           {selected ? (
             <AgentDetail
               agent={selected}
+              user={user}
               onEdit={() => setModal(selected)}
               onDelete={() => handleDelete(selected)}
             />

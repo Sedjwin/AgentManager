@@ -83,6 +83,23 @@ class AgentToolConfig(BaseModel):
     enabled_tools: list[str]  # list of tool names
 
 
+class SessionBrowserEntry(BaseModel):
+    session_id: str
+    started_at: datetime | None = None
+    username: str | None = None
+    user_id: str | None = None
+    title: str | None = None
+    first_line: str | None = None
+    display_title: str
+    has_saved_title: bool = False
+
+
+class SessionBrowserUserGroup(BaseModel):
+    username: str
+    session_count: int
+    sessions: list[SessionBrowserEntry]
+
+
 # ── Session schemas ──────────────────────────────────────────────────────────
 
 class DeviceCapabilities(BaseModel):

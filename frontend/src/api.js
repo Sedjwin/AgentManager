@@ -36,3 +36,9 @@ export async function deleteAgent(id) {
   const r = await fetch(`${BASE}/${id}`, { method: 'DELETE' })
   if (!r.ok) throw new Error(await r.text())
 }
+
+export async function getAgentSessionBrowser(id) {
+  const r = await fetch(`${BASE}/${id}/session-browser`)
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}

@@ -12,8 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import Agent
-from app.schemas import AgentCreate, AgentListItem, AgentOut, AgentToolConfig, AgentToolItem, AgentUpdate
+from app.schemas import (
+    AgentCreate,
+    AgentListItem,
+    AgentOut,
+    AgentToolConfig,
+    AgentToolItem,
+    AgentUpdate,
+    SessionBrowserUserGroup,
+)
 from app.services.agent_memory import ensure_agent_data_dir
+from app.services.session_browser import build_session_browser
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
@@ -128,6 +137,14 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     if not agent:
         raise HTTPException(404, "Agent not found")
     return _agent_to_out(agent)
+
+
+@router.get("/{agent_id}/session-browser", response_model=list[SessionBrowserUserGroup])
+async def get_agent_session_browser(agent_id: str, db: AsyncSession = Depends(get_db)):
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    return build_session_browser(agent_id)
 
 
 @router.put("/{agent_id}", response_model=AgentOut)
