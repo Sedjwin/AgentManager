@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Edit2,
   Trash2,
   Mic,
@@ -277,9 +278,11 @@ function SessionDetail({ session, loading, error, onBack }) {
 
 function SessionEventCard({ event }) {
   const [showInfo, setShowInfo] = useState(false)
+  const [showTimeline, setShowTimeline] = useState(false)
   const roleTone = event.role === 'assistant'
     ? 'border-blue-900/60 bg-blue-950/20'
     : 'border-gray-800 bg-gray-900/60'
+  const audioUrl = event.audio_file ? sessionAudioUrl(event.details.agent_id, event.details.session_id, event.audio_file) : null
 
   return (
     <div className={`rounded-xl border p-4 space-y-3 ${roleTone}`}>
@@ -315,21 +318,42 @@ function SessionEventCard({ event }) {
 
       {Array.isArray(event.timeline) && event.timeline.length > 0 && (
         <div>
-          <div className="text-xs text-gray-500 mb-1">Timeline</div>
-          <div className="space-y-1">
-            {event.timeline.map((item, idx) => (
-              <div key={idx} className="text-xs text-gray-300 font-mono">
-                {item.t ?? 0}ms • {item.type}: {String(item.value)}
-              </div>
-            ))}
-          </div>
+          <button
+            onClick={() => setShowTimeline(v => !v)}
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            {showTimeline ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            Timeline ({event.timeline.length})
+          </button>
+          {showTimeline && (
+            <div className="mt-2 space-y-1">
+              {event.timeline.map((item, idx) => (
+                <div key={idx} className="text-xs text-gray-300 font-mono">
+                  {item.t ?? 0}ms • {item.type}: {String(item.value)}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       {(event.audio_file || typeof event.duration_ms === 'number') && (
         <div className="grid gap-2 md:grid-cols-2">
           <Field label="Duration">{typeof event.duration_ms === 'number' ? `${event.duration_ms} ms` : '-'}</Field>
-          <Field label="Audio File">{event.audio_file || '-'}</Field>
+          <Field label="Audio File">
+            {audioUrl ? (
+              <div className="space-y-2">
+                <a href={audioUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-300 hover:text-blue-200 break-all">
+                  {event.audio_file}
+                </a>
+                <audio controls preload="none" className="w-full max-w-xs">
+                  <source src={audioUrl} type="audio/wav" />
+                </audio>
+              </div>
+            ) : (
+              event.audio_file || '-'
+            )}
+          </Field>
         </div>
       )}
 
@@ -347,6 +371,11 @@ function labelForEvent(event) {
   if (event.role === 'user') return event.source === 'audio' ? 'User Audio' : 'User Message'
   if (event.role === 'assistant') return 'Assistant Response'
   return event.role || 'Event'
+}
+
+function sessionAudioUrl(agentId, sessionId, audioFile) {
+  if (!agentId || !sessionId || !audioFile) return null
+  return `/agents/${agentId}/sessions/${sessionId}/files/${audioFile}`
 }
 
 function formatSessionTime(value) {

@@ -58,6 +58,8 @@ def read_session_detail(agent_id: str, session_id: str) -> dict | None:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            event["agent_id"] = agent_id
+            event["session_id"] = session_id
             events.append({
                 "ts": event.get("ts"),
                 "turn": event.get("turn"),

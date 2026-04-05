@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -157,6 +159,28 @@ async def get_agent_session_detail(agent_id: str, session_id: str, db: AsyncSess
     if not detail:
         raise HTTPException(404, "Session not found")
     return detail
+
+
+@router.get("/{agent_id}/sessions/{session_id}/files/{file_path:path}")
+async def get_agent_session_file(agent_id: str, session_id: str, file_path: str, db: AsyncSession = Depends(get_db)):
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    session_dir = Path("data") / "agents" / agent_id / "sessions" / session_id
+    requested = (session_dir / file_path).resolve()
+    session_root = session_dir.resolve()
+
+    if not requested.is_file():
+        raise HTTPException(404, "File not found")
+    if session_root not in requested.parents:
+        raise HTTPException(400, "Invalid file path")
+
+    media_type = None
+    if requested.suffix.lower() == ".wav":
+        media_type = "audio/wav"
+
+    return FileResponse(requested, media_type=media_type, filename=requested.name)
 
 
 @router.put("/{agent_id}", response_model=AgentOut)
