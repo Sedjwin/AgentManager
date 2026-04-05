@@ -42,3 +42,9 @@ export async function getAgentSessionBrowser(id) {
   if (!r.ok) throw new Error(await r.text())
   return r.json()
 }
+
+export async function getAgentSessionDetail(agentId, sessionId) {
+  const r = await fetch(`${BASE}/${agentId}/sessions/${sessionId}`)
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}

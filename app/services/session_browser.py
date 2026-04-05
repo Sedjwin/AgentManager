@@ -33,6 +33,64 @@ def build_session_browser(agent_id: str) -> list[dict]:
     return out
 
 
+def read_session_detail(agent_id: str, session_id: str) -> dict | None:
+    meta_path = agent_data_dir(agent_id) / "sessions" / session_id / "session.json"
+    if not meta_path.exists():
+        return None
+
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+    session = _read_session_entry(agent_id, meta)
+    if not session:
+        return None
+
+    events = []
+    conversation_path = agent_data_dir(agent_id) / "sessions" / session_id / "conversation.jsonl"
+    if conversation_path.exists():
+        for line in conversation_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            events.append({
+                "ts": event.get("ts"),
+                "turn": event.get("turn"),
+                "role": event.get("role"),
+                "source": event.get("source"),
+                "text": event.get("text"),
+                "chunk_index": event.get("chunk_index"),
+                "is_final": event.get("is_final"),
+                "duration_ms": event.get("duration_ms"),
+                "audio_file": event.get("audio_file"),
+                "timeline": event.get("timeline"),
+                "raw_llm": event.get("raw_llm"),
+                "details": event,
+            })
+
+    _apply_chatportal_titles(agent_id, [session])
+    return {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "started_at": meta.get("started_at"),
+        "ended_at": meta.get("ended_at"),
+        "turn_count": meta.get("turn_count"),
+        "username": meta.get("username"),
+        "user_id": str(meta.get("user_id")) if meta.get("user_id") is not None else None,
+        "device_capabilities": meta.get("device_capabilities"),
+        "title": session.get("title"),
+        "first_line": session.get("first_line"),
+        "display_title": session["display_title"],
+        "has_saved_title": session["has_saved_title"],
+        "events": events,
+    }
+
+
 def _read_session_entry(agent_id: str, meta: dict) -> dict | None:
     session_id = meta.get("session_id")
     if not session_id:

@@ -100,6 +100,37 @@ class SessionBrowserUserGroup(BaseModel):
     sessions: list[SessionBrowserEntry]
 
 
+class SessionLogEvent(BaseModel):
+    ts: str | None = None
+    turn: int | None = None
+    role: str | None = None
+    source: str | None = None
+    text: str | None = None
+    chunk_index: int | None = None
+    is_final: bool | None = None
+    duration_ms: int | None = None
+    audio_file: str | None = None
+    timeline: list[dict[str, Any]] | None = None
+    raw_llm: str | None = None
+    details: dict[str, Any]
+
+
+class SessionLogDetail(BaseModel):
+    session_id: str
+    agent_id: str
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    turn_count: int | None = None
+    username: str | None = None
+    user_id: str | None = None
+    device_capabilities: dict[str, Any] | None = None
+    title: str | None = None
+    first_line: str | None = None
+    display_title: str
+    has_saved_title: bool = False
+    events: list[SessionLogEvent]
+
+
 # ── Session schemas ──────────────────────────────────────────────────────────
 
 class DeviceCapabilities(BaseModel):

@@ -20,9 +20,10 @@ from app.schemas import (
     AgentToolItem,
     AgentUpdate,
     SessionBrowserUserGroup,
+    SessionLogDetail,
 )
 from app.services.agent_memory import ensure_agent_data_dir
-from app.services.session_browser import build_session_browser
+from app.services.session_browser import build_session_browser, read_session_detail
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
@@ -145,6 +146,17 @@ async def get_agent_session_browser(agent_id: str, db: AsyncSession = Depends(ge
     if not agent:
         raise HTTPException(404, "Agent not found")
     return build_session_browser(agent_id)
+
+
+@router.get("/{agent_id}/sessions/{session_id}", response_model=SessionLogDetail)
+async def get_agent_session_detail(agent_id: str, session_id: str, db: AsyncSession = Depends(get_db)):
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    detail = read_session_detail(agent_id, session_id)
+    if not detail:
+        raise HTTPException(404, "Session not found")
+    return detail
 
 
 @router.put("/{agent_id}", response_model=AgentOut)
