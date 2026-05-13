@@ -165,7 +165,7 @@ async def stream_response_post(
     db: AsyncSession = Depends(get_db),
 ):
     """SSE endpoint (POST) — streams response chunks."""
-    return await _do_stream(session_id, body.text, db)
+    return await _do_stream(session_id, body.text, db, include_reasoning=body.include_reasoning)
 
 
 @router.post("/sessions/{session_id}/debug")
@@ -248,7 +248,12 @@ async def _get_tool_skill_mds(agent) -> list[str]:
     return [t["skill_md"] for t in tools_data if t.get("skill_md")]
 
 
-async def _do_stream(session_id: str, text: str, db: AsyncSession) -> StreamingResponse:
+async def _do_stream(
+    session_id: str,
+    text: str,
+    db: AsyncSession,
+    include_reasoning: bool = False,
+) -> StreamingResponse:
     session, agent = await _load_session_and_agent(session_id, db)
     profile = json.loads(agent.profile) if agent.profile else None
     voice_config = json.loads(agent.voice_config) if agent.voice_config else None
@@ -268,6 +273,7 @@ async def _do_stream(session_id: str, text: str, db: AsyncSession) -> StreamingR
             tool_use_enabled=agent.tool_use_enabled,
             tool_skill_mds=tool_skill_mds,
             memory_tools_enabled=bool(agent.memory_tools_enabled),
+            include_reasoning=include_reasoning,
         ):
             yield f"data: {chunk.model_dump_json()}\n\n"
         yield "data: [DONE]\n\n"

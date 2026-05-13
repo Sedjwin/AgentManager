@@ -257,6 +257,7 @@ async def process_text_streaming(
     tool_use_enabled: bool = False,
     tool_skill_mds: list[str] | None = None,
     memory_tools_enabled: bool = True,
+    include_reasoning: bool = False,
 ) -> AsyncIterator[AgentResponse]:
     """
     Streaming pipeline: splits LLM output at sentence boundaries,
@@ -287,7 +288,12 @@ async def process_text_streaming(
         current_agent_id=_agent_id,
         voice_conversation=voice_enabled,
     )
-    raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
+    suppress_reasoning = voice_enabled and not include_reasoning
+    raw_llm, reasoning = await _call_llm(
+        messages,
+        ai_gateway_token,
+        suppress_reasoning=suppress_reasoning,
+    )
 
     if session.interrupted:
         return
@@ -354,7 +360,11 @@ async def process_text_streaming(
         ]
         # Swap to compact system from round 1 onward — model already has full docs
         conversation = [{"role": "system", "content": _compact_sys}] + conversation[1:]
-        current, _ = await _call_llm(conversation, ai_gateway_token)
+        current, _ = await _call_llm(
+            conversation,
+            ai_gateway_token,
+            suppress_reasoning=suppress_reasoning,
+        )
 
         if session.interrupted:
             return
@@ -437,9 +447,16 @@ async def process_text_streaming(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _call_llm(messages: list[dict[str, str]], token: str) -> tuple[str, str | None]:
+async def _call_llm(
+    messages: list[dict[str, str]],
+    token: str,
+    suppress_reasoning: bool = False,
+) -> tuple[str, str | None]:
     """Call AIGateway. Returns (content, reasoning) — reasoning may be None."""
     payload = {"messages": messages, "stream": False, "max_tokens": 16384}
+    if suppress_reasoning:
+        payload["include_reasoning"] = False
+        payload["reasoning"] = {"effort": "none", "exclude": True}
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
             f"{settings.aigateway_url}/v1/chat/completions",

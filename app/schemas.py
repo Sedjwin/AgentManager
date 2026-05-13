@@ -150,6 +150,7 @@ class SessionOut(BaseModel):
 class TextMessage(BaseModel):
     text: str
     history: list[dict[str, str]] = []
+    include_reasoning: bool = False
 
 
 class TimelineEvent(BaseModel):
