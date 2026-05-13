@@ -61,6 +61,7 @@ async def process_text(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
+        voice_conversation=voice_enabled,
     )
     _compact_sys = build_compact_system(
         agent_system_prompt, profile, tool_use_enabled, tool_skill_mds,
@@ -68,6 +69,7 @@ async def process_text(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
+        voice_conversation=voice_enabled,
     )
 
     # Step 2b: Call AIGateway
@@ -170,6 +172,7 @@ async def process_audio(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
+        voice_conversation=voice_enabled,
     )
     _compact_sys = build_compact_system(
         agent_system_prompt, profile, tool_use_enabled, tool_skill_mds,
@@ -177,6 +180,7 @@ async def process_audio(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
+        voice_conversation=voice_enabled,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
@@ -273,6 +277,7 @@ async def process_text_streaming(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
+        voice_conversation=voice_enabled,
     )
     _compact_sys = build_compact_system(
         agent_system_prompt, profile, tool_use_enabled, tool_skill_mds,
@@ -280,6 +285,7 @@ async def process_text_streaming(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
+        voice_conversation=voice_enabled,
     )
     raw_llm, reasoning = await _call_llm(messages, ai_gateway_token)
 
@@ -583,6 +589,7 @@ async def process_text_debug(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
+        voice_conversation=voice_enabled,
     )
     _compact_sys = build_compact_system(
         agent_system_prompt, profile, tool_use_enabled, tool_skill_mds,
@@ -590,6 +597,7 @@ async def process_text_debug(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=session.session_id,
         current_agent_id=_agent_id,
+        voice_conversation=voice_enabled,
     )
 
     # ── Round 0: initial LLM call ────────────────────────────────────────────

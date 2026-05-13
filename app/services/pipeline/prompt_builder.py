@@ -24,6 +24,13 @@ TOOLS: Full tool instructions were provided at the start of this conversation.
 Available tools: {tool_list}
 Use {{tool:name|param=value}} syntax as described earlier."""
 
+_VOICE_CONVERSATION_NOTE = """
+---
+VOICE CONVERSATION:
+You are speaking in a live voice chat. Reply in a natural conversational style: short, direct, and rarely more than a couple of sentences. Prefer the fastest useful answer over a comprehensive one.
+
+If the user explicitly asks for detail, a list, a story, a walkthrough, or asks you to continue, you may answer longer. When you do, finish complete sentences and complete thoughts; do not trail off or stop mid-sentence."""
+
 
 def build_messages(
     agent_system_prompt: str,
@@ -37,6 +44,7 @@ def build_messages(
     memory_tools_enabled: bool = True,
     current_session_id: str | None = None,
     current_agent_id: str | None = None,
+    voice_conversation: bool = False,
 ) -> list[dict[str, str]]:
     system = _build_system(
         agent_system_prompt, profile, tool_use_enabled, tool_skill_mds or [],
@@ -44,6 +52,7 @@ def build_messages(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=current_session_id,
         current_agent_id=current_agent_id,
+        voice_conversation=voice_conversation,
     )
     messages = [{"role": "system", "content": system}]
     messages.extend(history)
@@ -61,6 +70,7 @@ def build_compact_system(
     memory_tools_enabled: bool = True,
     current_session_id: str | None = None,
     current_agent_id: str | None = None,
+    voice_conversation: bool = False,
 ) -> str:
     """Compact system prompt for tool rounds > 0.
 
@@ -73,6 +83,7 @@ def build_compact_system(
         memory_tools_enabled=memory_tools_enabled,
         current_session_id=current_session_id,
         current_agent_id=current_agent_id,
+        voice_conversation=voice_conversation,
         compact=True,
     )
 
@@ -87,9 +98,13 @@ def _build_system(
     memory_tools_enabled: bool = True,
     current_session_id: str | None = None,
     current_agent_id: str | None = None,
+    voice_conversation: bool = False,
     compact: bool = False,
 ) -> str:
     base = agent_system_prompt
+
+    if voice_conversation:
+        base += _VOICE_CONVERSATION_NOTE
 
     # Inject agent's persistent memory
     if personal_context:
