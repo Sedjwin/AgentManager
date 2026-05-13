@@ -289,6 +289,21 @@ async def process_text_streaming(
         voice_conversation=voice_enabled,
     )
     suppress_reasoning = voice_enabled and not include_reasoning
+
+    if voice_enabled and not tool_use_enabled:
+        async for chunk in _process_fast_voice_stream(
+            session=session,
+            messages=messages,
+            ai_gateway_token=ai_gateway_token,
+            suppress_reasoning=suppress_reasoning,
+            include_reasoning=include_reasoning,
+            profile=profile,
+            voice_config=voice_config,
+            turn=turn,
+        ):
+            yield chunk
+        return
+
     raw_llm, reasoning = await _call_llm(
         messages,
         ai_gateway_token,
@@ -470,6 +485,146 @@ async def _call_llm(
         # OpenRouter returns reasoning in "reasoning" (some models use "reasoning_content")
         reasoning = msg.get("reasoning") or msg.get("reasoning_content") or None
         return content, reasoning
+
+
+async def _stream_llm(
+    messages: list[dict[str, str]],
+    token: str,
+    suppress_reasoning: bool = False,
+) -> AsyncIterator[tuple[str, str]]:
+    """Stream AIGateway content/reasoning deltas as (kind, text)."""
+    payload = {"messages": messages, "stream": True, "max_tokens": 16384}
+    if suppress_reasoning:
+        payload["include_reasoning"] = False
+        payload["reasoning"] = {"effort": "none", "exclude": True}
+
+    timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream(
+            "POST",
+            f"{settings.aigateway_url}/v1/chat/completions",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if not data or data == "[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    yield ("content", content)
+                reasoning = (
+                    delta.get("reasoning")
+                    or delta.get("reasoning_content")
+                    or delta.get("reasoning_details")
+                )
+                if reasoning:
+                    if isinstance(reasoning, str):
+                        yield ("reasoning", reasoning)
+                    else:
+                        yield ("reasoning", json.dumps(reasoning))
+
+
+def _pop_complete_sentence(buffer: str) -> tuple[str | None, str]:
+    """Return the first complete sentence from buffer, keeping the remainder."""
+    import re
+    match = re.search(r"(?<=[.!?])\s+", buffer)
+    if not match:
+        return None, buffer
+    return buffer[:match.end()], buffer[match.end():]
+
+
+async def _process_fast_voice_stream(
+    session: Session,
+    messages: list[dict[str, str]],
+    ai_gateway_token: str,
+    suppress_reasoning: bool,
+    include_reasoning: bool,
+    profile: dict[str, Any] | None,
+    voice_config: dict[str, Any] | None,
+    turn: int,
+) -> AsyncIterator[AgentResponse]:
+    raw_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    pending = ""
+    full_clean = ""
+    chunk_index = 0
+    first_chunk = True
+
+    async def emit_sentence(sentence_raw: str, is_final: bool = False) -> AgentResponse | None:
+        nonlocal full_clean, chunk_index, first_chunk
+        clean_text, annotations, _ = parse_response(sentence_raw, profile)
+        if not clean_text.strip():
+            return None
+
+        tts = await synthesize(clean_text, voice_config)
+        timeline = assemble_timeline(annotations, clean_text, tts)
+        response = AgentResponse(
+            session_id=session.session_id,
+            text=clean_text,
+            reasoning="".join(reasoning_parts) if include_reasoning and first_chunk and reasoning_parts else None,
+            audio=tts.get("audio"),
+            duration_ms=tts.get("duration_ms"),
+            sample_rate=tts.get("sample_rate"),
+            buffer_bytes=tts.get("buffer_bytes"),
+            timeline=timeline,
+            chunk_index=chunk_index,
+            is_final=is_final,
+        )
+        session.logger.log_assistant(
+            turn=turn,
+            text=clean_text,
+            raw_llm="".join(raw_parts) if first_chunk else None,
+            audio_b64=response.audio,
+            duration_ms=response.duration_ms,
+            timeline=[e.model_dump() for e in timeline],
+            chunk_index=chunk_index,
+            is_final=is_final,
+        )
+        full_clean += clean_text
+        if not full_clean.endswith(" "):
+            full_clean += " "
+        chunk_index += 1
+        first_chunk = False
+        return response
+
+    async for kind, text in _stream_llm(messages, ai_gateway_token, suppress_reasoning=suppress_reasoning):
+        if session.interrupted:
+            return
+        if kind == "reasoning":
+            reasoning_parts.append(text)
+            continue
+
+        raw_parts.append(text)
+        pending += text
+        while True:
+            sentence, pending = _pop_complete_sentence(pending)
+            if sentence is None:
+                break
+            response = await emit_sentence(sentence)
+            if response:
+                yield response
+
+    if session.interrupted:
+        return
+
+    if pending.strip():
+        response = await emit_sentence(pending, is_final=True)
+        if response:
+            yield response
+
+    session.add_turn(messages[-1].get("content", ""), full_clean.strip())
 
 
 _MAX_TOOL_ROUNDS = 20
