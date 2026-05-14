@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     toolgateway_service_key: str = ""  # UserManager admin API key used to call ToolGateway
     database_url: str = "sqlite+aiosqlite:///./data/agentmanager.db"
     webservice_files_url: str = "https://chip.iampc.uk:13383/files"
+    avatar_service_url: str = ""  # e.g. http://127.0.0.1:8013 — empty disables push
 
     model_config = {"env_file": ".env"}
 

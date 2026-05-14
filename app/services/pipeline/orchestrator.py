@@ -4,6 +4,7 @@ MessagePipeline — orchestrates the full Steps 1-6 from the spec:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -25,6 +26,7 @@ from app.services.pipeline.prompt_builder import build_compact_system, build_mes
 from app.services.pipeline.response_parser import parse_response
 from app.services.pipeline.timeline_assembler import assemble_timeline
 from app.services.pipeline.tool_executor import execute_tool_calls, format_tool_results_for_llm
+from app.services.avatar_push import push_utterance
 from app.services.pipeline.voice_processor import synthesize, transcribe
 from app.services.session_manager import Session
 
@@ -126,7 +128,7 @@ async def process_text(
         timeline=[e.model_dump() for e in timeline],
     )
 
-    return AgentResponse(
+    result = AgentResponse(
         session_id=session.session_id,
         text=clean_text,
         reasoning=reasoning,
@@ -137,6 +139,8 @@ async def process_text(
         timeline=timeline,
         is_final=True,
     )
+    asyncio.create_task(push_utterance(_agent_id, session.device_capabilities, result))
+    return result
 
 
 async def process_audio(
@@ -230,7 +234,7 @@ async def process_audio(
         timeline=[e.model_dump() for e in timeline],
     )
 
-    return AgentResponse(
+    result = AgentResponse(
         session_id=session.session_id,
         text=clean_text,
         reasoning=reasoning,
@@ -242,6 +246,8 @@ async def process_audio(
         timeline=timeline,
         is_final=True,
     )
+    asyncio.create_task(push_utterance(_agent_id, session.device_capabilities, result))
+    return result
 
 
 async def process_text_streaming(
@@ -300,6 +306,7 @@ async def process_text_streaming(
             profile=profile,
             voice_config=voice_config,
             turn=turn,
+            agent_id=_agent_id,
         ):
             yield chunk
         return
@@ -443,7 +450,7 @@ async def process_text_streaming(
             is_final=is_final,
         )
 
-        yield AgentResponse(
+        chunk = AgentResponse(
             session_id=session.session_id,
             text=sentence,
             # Attach reasoning only to the first chunk so the client receives it once
@@ -456,6 +463,8 @@ async def process_text_streaming(
             chunk_index=i,
             is_final=is_final,
         )
+        asyncio.create_task(push_utterance(_agent_id, session.device_capabilities, chunk))
+        yield chunk
 
     session.add_turn(user_text, full_clean)
 
@@ -498,8 +507,7 @@ async def _stream_llm(
         payload["include_reasoning"] = False
         payload["reasoning"] = {"effort": "none", "exclude": True}
 
-    timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)) as client:
         async with client.stream(
             "POST",
             f"{settings.aigateway_url}/v1/chat/completions",
@@ -554,6 +562,7 @@ async def _process_fast_voice_stream(
     profile: dict[str, Any] | None,
     voice_config: dict[str, Any] | None,
     turn: int,
+    agent_id: str,
 ) -> AsyncIterator[AgentResponse]:
     raw_parts: list[str] = []
     reasoning_parts: list[str] = []
